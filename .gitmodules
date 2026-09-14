@@ -1,0 +1,3 @@
+[submodule "vendor/boamp-finder"]
+	path = vendor/boamp-finder
+	url = https://forge.cadoles.com/mlamalle/boamp-finder

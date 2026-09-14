@@ -1,0 +1,240 @@
+html,
+body {
+    height: 100%
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.avatar {
+    border-radius: 100%;
+    width: 35px;
+    height: 35px;
+}
+
+.bigavatar {
+    border-radius: 100%;
+    width: 100px;
+    height: 100px;
+}
+
+.navbar-brand img {
+    width: 40px;
+    margin-right: 10px;
+}
+
+.navbar-toggler {
+    border: none;
+    box-shadow: none !important;
+}
+
+main {
+    display: flex;
+    flex-grow: 1;
+    align-items: stretch;
+}
+
+aside.app-sidebar {
+    width: 300px;
+    padding: 15px;
+    background-color: rgba(var(--bs-dark-rgb));
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+aside.app-sidebar div {
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 10px;
+}
+
+aside.app-sidebar>div>a {
+    text-decoration: none;
+    color: var(--bs-body-color);
+    opacity: 0.6;
+}
+
+aside.app-sidebar>div>a:hover {
+    text-decoration: none;
+    opacity: 1;
+}
+
+.sidebar-nav-scroll {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow-y: auto;
+}
+
+.sidebar-nav-link {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--bs-body-color);
+    opacity: 0.8;
+    text-decoration: none;
+    transition: opacity 0.2s;
+}
+
+.sidebar-nav-link:hover {
+    opacity: 1;
+    text-decoration: none;
+}
+
+.sidebar-nav-link.active {
+    opacity: 1;
+    color: var(--bs-primary);
+}
+
+.sidebar-nav-children {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 8px 12px;
+}
+
+.sidebar-nav-child {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    color: var(--bs-body-color);
+    opacity: 0.6;
+    text-decoration: none;
+    font-size: 0.9em;
+    transition: opacity 0.2s;
+}
+
+.sidebar-nav-child:hover {
+    opacity: 1;
+    text-decoration: none;
+}
+
+.sidebar-nav-child.active {
+    opacity: 1;
+    color: var(--bs-primary);
+    font-weight: 500;
+}
+
+.app-content {
+    flex-grow: 1;
+    align-items: stretch;
+    padding: 15px;
+}
+
+@media (max-width: 991px) {
+    aside.app-sidebar {
+        display: none;
+    }
+
+    .navbar-nav.me-auto .nav-link {
+        padding: 0.6rem 1rem;
+        color: var(--bs-body-color);
+        border-bottom: 1px solid var(--bs-border-color);
+    }
+
+    .navbar-nav.me-auto .nav-link.active {
+        color: var(--bs-primary);
+        font-weight: 500;
+    }
+
+    .navbar-nav.me-auto .nav-link i {
+        width: 24px;
+        text-align: center;
+    }
+}
+
+.select2-container--bootstrap-5 .select2-selection {
+    padding: 2px 2px 0px 2px;
+}
+
+.select2-container--bootstrap-5 .select2-selection--multiple .select2-selection__rendered .select2-selection__choice {
+    padding: 2px;
+}
+
+.select2-container:not(.select2-container--open) .select2-search {
+    display: none;
+}
+
+.select2-container .select2-search__field {
+    width: 100% !important;
+}
+
+.select2-container--bootstrap-5 .select2-selection--multiple .select2-selection__rendered .select2-selection__choice {
+    margin-bottom: 2px;
+    margin-right: 2px;
+    padding: 3px;
+}
+
+small {
+    font-size: 80%;
+}
+
+blockquote {
+    font-style: italic;
+}
+
+hr {
+    border: 3px solid var(--bs-yellow);
+    margin-top: 35px;
+    margin-bottom: 1.5rem;
+    opacity: 1;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1rem;
+}
+
+.table-equal {
+    table-layout: fixed;
+}
+
+.table-equal th,
+.table-equal td {
+    width: calc(100% / 7);
+    text-align: center;
+}
+
+table th,
+table td {
+    border: 1px solid #444;
+    padding: 0.5rem;
+    text-align: left;
+    vertical-align: top;
+}
+
+table thead th {
+    background-color: var(--bs-light);
+    font-weight: bold;
+    vertical-align: bottom;
+}
+
+h1,
+h2,
+h3,
+h4,
+strong,
+b {
+    color: var(--bs-yellow);
+}
+/* Bouton de suppression (mini-form POST) aligné sur la ligne des boutons
+   d'action du form principal, tout en restant hors du form. */
+.delete-abs {
+    position: absolute;
+    right: 0;
+    top: 0;
+}
+
+/* Page de login */
+.login-logo {
+    width: 100px;
+}
+
+.login-card {
+    width: 300px;
+}

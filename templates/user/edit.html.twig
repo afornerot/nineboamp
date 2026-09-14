@@ -1,0 +1,70 @@
+{% extends 'base.html.twig' %}
+
+{% block title %} = {{title}}{% endblock %}
+
+{% block body %}
+    <h1>{{title}}</h1>
+
+    <div class="position-relative">
+        {%if mode=="update" %}{% include 'include/delete_button.html.twig' with {route: routedelete, id: form.vars.value.id, tokenId: 'delete-user' ~ form.vars.value.id, classes: 'delete-abs'} %}{%endif%}
+
+        {{ form_start(form) }}
+       
+        {{ form_widget(form.submit) }}
+        <a href="{{ path(routecancel) }}" class="btn btn-secondary ms-1">Annuler</a>
+
+        {% include('include/error.html.twig') %}
+
+        <div class="text-center d-flex flex-column align-items-center">
+            <img id="user_avatar_img" src="{{asset(form.vars.value.avatar)}}" class="bigavatar mb-2">
+            {{ form_row(form.avatar) }}
+            <a class="btn btn-info" style="max-width:100%; margin-bottom:15px;" onclick="BnineModalOpen({id:'bnine-modal-avatar',title:'Avatar',url:'{{ path('bninefiles_files_uploadmodal',{domain:'avatar',id:0}) }}?crop',currentInput:'user_avatar'})" title='Ajouter un avatar'>Modifier</a>
+        </div>
+
+        <div class="row">
+            <div class="col-md-6 mx-auto">
+                <div class="card mt-3">
+                    <div class="card-header">Information</div>
+                    <div class="card-body">
+                        {{ form_row(form.username) }}
+                        {{ form_row(form.lastname) }}
+                        {{ form_row(form.firstname) }}
+                        {%if form.password is defined%}
+                            {{ form_row(form.password) }}
+                        {% endif %}
+                        {{ form_row(form.email) }}
+                    </div>
+                </div>
+            </div>
+
+            {%if form.roles is defined%}
+                <div class="col-md-6">
+                    <div class="card mt-3">
+                        <div class="card-header">Permissions</div>
+                        <div class="card-body">
+                            {{ form_row(form.roles) }}
+                            {{ form_row(form.groupes) }}
+                        </div>
+                    </div>
+                </div>
+            {%endif%}        
+        </div>
+    {{ form_end(form) }}
+    </div>
+
+{% endblock %}
+
+{% block localscript %}
+    <script>
+        $(document).ready(function() {
+            $("#user_username").focus();
+        });
+
+        document.addEventListener('bnine-modal-closed', function() {
+            var val = $('#user_avatar').val();
+            if (val) {
+                $('#user_avatar_img').attr('src', val).show();
+            }
+        });
+    </script>
+{% endblock %}

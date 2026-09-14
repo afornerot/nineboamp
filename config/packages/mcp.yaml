@@ -1,0 +1,15 @@
+mcp:
+    servers:
+        app:
+            version: '1.0.0'
+            description: 'Serveur MCP applicatif'
+            transports:
+                stdio: true
+                http: true
+            http:
+                path: /mcp
+                allowed_hosts: false
+            session:
+                store: framework
+                prefix: 'mcp-app-'
+            registry: '*'

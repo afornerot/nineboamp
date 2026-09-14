@@ -1,0 +1,36 @@
+services:
+  mariadb:
+    image: mariadb:11.4
+    container_name: nineboamp-mariadb
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: changeme
+      MYSQL_DATABASE: nineboamp
+      MYSQL_USER: nineboamp
+      MYSQL_PASSWORD: changeme
+    volumes:
+      - ./volume/mariadb:/var/lib/mysql
+
+  nineboamp:
+    build:
+      context: .
+      dockerfile: ./misc/docker/Dockerfile
+    container_name: nineboamp
+    restart: unless-stopped
+    image: reg.cadoles.com/envole/nineboamp
+    user: "${UID:-1000}:102"
+    depends_on:
+      - mariadb
+    ports:
+      - "8024:80"
+    volumes:
+      - ./public/uploads:/app/public/uploads:delegated
+      - ./uploads:/app/uploads:delegated
+      - ./templates:/app/templates:delegated
+      - ./config:/app/config:delegated
+      - ./src:/app/src:delegated
+      - ./misc:/app/misc:delegated
+      - ./public/lib:/app/public/lib:delegated
+      - ./var:/app/var
+      - ./.env.local:/app/.env.local
+      - ./.env:/app/.env

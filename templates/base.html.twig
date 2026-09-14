@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="UTF-8">
+        <title>{{appName}} {% block title %}{% endblock %}</title>
+        <link rel="icon" href="">
+
+        <link rel="stylesheet" href="{{ asset('lib/bootstrap/css/bootstrap.min.css') }}">
+        <link rel="stylesheet" href="{{ asset('lib/bootswatch/bootswatch.min.css') }}">
+        <link rel="stylesheet" href="{{ asset('lib/fontawesome/css/all.min.css') }}">
+        <link rel="stylesheet" href="{{ asset('lib/datatables/datatables.min.css') }}">
+        <link rel="stylesheet" href="{{ asset('lib/select2/select2.min.css') }}">
+        <link rel="stylesheet" href="{{ asset('lib/select2/select2-bootstrap-5-theme.min.css') }}">
+        <link rel="stylesheet" href="{{ asset('lib/dropzone/dropzone.min.css') }}">
+        <link rel="stylesheet" href="{{ asset('lib/dropzone/dropzone-bootstrap.css') }}">
+        <link rel="stylesheet" href="{{ asset('lib/imgareaselect/css/imgareaselect-default.css') }}">
+
+        <link rel="stylesheet" href="{{ asset('lib/app/app.css') }}">
+        <link rel="stylesheet" href="{{ asset('lib/app/selbg.css') }}">
+        <link rel="stylesheet" href="{{ asset('bundles/bninefiles/css/bninefiles.css') }}">
+
+        <script defer src="{{ asset('lib/jquery/jquery.min.js')  }}"></script>
+        <script defer src="{{ asset('lib/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
+        <script defer src="{{ asset('lib/datatables/datatables.min.js') }}"></script>
+        <script defer src="{{ asset('lib/datatables/datatables.init.js') }}"></script>
+        <script defer src="{{ asset('lib/select2/select2.min.js') }}"></script>
+        <script defer src="{{ asset('lib/select2/select2.init.js') }}"></script>
+        <script defer src="{{ asset('lib/dropzone/dropzone.min.js') }}"></script>
+        <script defer src="{{ asset('lib/imgareaselect/js/jquery.imgareaselect.dev.js') }}"></script>
+        <script defer src="{{ asset('lib/jqueryui/jquery-ui.min.js') }}"></script>
+        <script defer src="{{ asset('lib/chart/chart.js') }}"></script>
+        <script defer src="{{ asset('lib/marked/marked.min.js') }}"></script>
+
+        <script defer src="{{ asset('bundles/bninemdeditor/bninemdeditor.js') }}"></script>
+        <script defer src="{{ asset('bundles/bninefiles/js/bninefiles.js') }}"></script>
+        <script defer src="{{ asset('lib/app/app.js') }}"></script>
+
+        {% block javascripts %}
+
+        {% endblock %}
+    </head>
+
+    {% block localstyle %}
+    {% endblock %}
+
+    <body>
+        {% if usemenu is defined and usemenu %}
+            <nav class="navbar navbar-expand-lg bg-dark" data-bs-theme="dark">
+                <div class="container-fluid">
+                    <a class="navbar-brand" href="{{ path('app_home') }}">
+                        <img src="{{asset("medias/logo/logo.png")}}"> {{appName}}
+                    </a>
+
+                    <div class="collapse navbar-collapse" id="navbarColor02">
+                    </div>
+
+                    <div class="navbar-nav ms-auto ps-3 d-flex flex-row align-items-center position-absolute" style="right: 15px; top:15px">
+                        {% if app.user %}
+                            {% if is_granted('ROLE_ADMIN') %}
+                                <a class="nav-link px-2" href="{{path('app_admin')}}" aria-label="Administration"><i class="fa-solid fa-cog fa-2x"></i></a>
+                            {% endif %}
+                            <a class="nav-link px-2" href="{{path('app_user_profil')}}" aria-label="Profil"><img src="{{asset(app.user.avatar ?? 'medias/avatar/noavatar.png')}}" class="avatar" alt="Avatar"></a>
+                            <a class="nav-link px-2" href="{{path('app_logout')}}" aria-label="Déconnexion"><i class="fa-solid fa-right-from-bracket fa-2x"></i></a>
+                        {% else %}
+                            <a class="nav-link px-2" href="{{path('app_login')}}" aria-label="Connexion"><i class="fa-solid fa-right-to-bracket fa-2x"></i></a>
+                        {% endif %}
+
+                        <a class="navbar-toggler nav-link px-2" href="#" data-bs-toggle="collapse" data-bs-target="#navbarColor02" aria-controls="navbarColor02" aria-expanded="false" aria-label="Menu de navigation"><i class="fa-solid fa-bars fa-2x"></i></a>
+                    </div>
+                </div>
+            </nav>
+        {% endif %}
+
+        <main>
+            {% if usesidebar is defined and usesidebar %}
+                <aside class="app-sidebar">
+                    <div>
+                        {% if is_granted('ROLE_ADMIN') %}
+                            <span>ADMINISTRATION</span>
+                            <a href="{{ path('app_admin_user') }}" title="Utilisateurs">
+                                <i class="fas fa-user fa-fw"></i>
+                                <span>Utilisateurs</span>
+                            </a>
+                            <a href="{{ path('app_admin_groupe') }}" title="Groupes">
+                                <i class="fas fa-users fa-fw"></i>
+                                <span>Groupes</span>
+                            </a>
+                            <a href="{{ path('app_admin_cron') }}" title="Crons">
+                                <i class="fas fa-clock fa-fw"></i>
+                                <span>Crons</span>
+                            </a>
+                        {% endif %}
+                    </div>
+                </aside>
+            {% endif %}
+
+            <div class="app-content" style="margin: 0px auto; overflow-x: hidden; {{ (maxwidth is defined ? "max-width:"~maxwidth~"px;":"") }}">
+                {% block body %}
+                {% endblock %}
+            </div>
+        </main>
+
+        <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 9999;">
+            <div id="ajaxErrorToast" class="toast align-items-center text-bg-danger border-0" role="alert" aria-live="assertive" aria-atomic="true">
+                <div class="d-flex">
+                    <div class="toast-body" id="ajaxErrorMessage">
+                        Une erreur est survenue.
+                    </div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Fermer"></button>
+                </div>
+            </div>
+        </div>
+
+        <div id="mymodal" class="modal" tabindex="-1">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h4 class="modal-title">INFORMATION</h4>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <iframe id="framemodal" frameborder=0 width="100%" height="600px"></iframe>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </body>
+
+    {% block localscript %}
+    {% endblock %}
+</html>

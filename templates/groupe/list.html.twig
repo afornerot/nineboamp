@@ -1,0 +1,33 @@
+{% extends 'base.html.twig' %}
+
+{% block title %} = {{title}}{% endblock %}
+
+{% block body %}
+    <h1>{{title}}</h1>
+    <a href="{{ path(routesubmit) }}" class="btn btn-success">Ajouter</a>
+
+    <div class="dataTable_wrapper">
+        <table class="table table-striped table-bordered table-hover" id="dataTables" style="width:100%" data-order-col="1" data-order-dir="asc">
+            <thead>
+            <tr>
+                <th width="70px" class="no-sort">Action</th>
+                <th>Nom</th>
+                <th>Utilisateurs</th>
+            </tr>
+            </thead>
+            <tbody>
+                {% for groupe in groupes %}
+                    <tr>
+                        <td><a href="{{ path(routeupdate,{id:groupe.id}) }}"><i class="fas fa-file fa-2x"></i></a></td>
+                        <td>{{groupe.name}}</td>
+                        <td>
+                            {% for user in groupe.users %}
+                                {{user.username}}{% if not loop.last %}, {% endif %}
+                            {% endfor %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock %}

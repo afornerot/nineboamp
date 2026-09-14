@@ -1,0 +1,18 @@
+nelmio_api_doc:
+    documentation:
+        info:
+            title: API Applicative
+            description: API de l'application
+            version: '1.0.0'
+        security:
+            - ApiKeyAuth: []
+        components:
+            securitySchemes:
+                ApiKeyAuth:
+                    type: apiKey
+                    in: header
+                    name: X-API-SECRET
+                    description: Secret API (APP_SECRET)
+    areas:
+        path_patterns:
+            - ^/v1/api

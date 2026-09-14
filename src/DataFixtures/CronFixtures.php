@@ -1,0 +1,43 @@
+<?php
+
+namespace App\DataFixtures;
+
+use App\Entity\Cron;
+use Doctrine\Bundle\FixturesBundle\Fixture;
+use Doctrine\Persistence\ObjectManager;
+
+class CronFixtures extends Fixture
+{
+    public function load(ObjectManager $manager): void
+    {
+        $crons = [
+            'app:bonjour' => [
+                'description' => 'Cron de test qui affiche Bonjour',
+                'statut' => Cron::STATUT_DISABLED,
+                'repeatcall' => 0,
+                'repeatexec' => 0,
+                'repeatinterval' => 60,
+            ],
+        ];
+
+        foreach ($crons as $command => $item) {
+            $cron = $manager->getRepository(Cron::class)->findOneBy(['command' => $command]);
+            if ($cron) {
+                continue;
+            }
+
+            $cron = new Cron();
+            $cron->setCommand($command);
+            $cron->setDescription($item['description']);
+            $cron->setStatut($item['statut']);
+            $cron->setRepeatcall($item['repeatcall']);
+            $cron->setRepeatexec($item['repeatexec']);
+            $cron->setRepeatinterval($item['repeatinterval']);
+            $cron->setNextexecdate(new \DateTime());
+
+            $manager->persist($cron);
+        }
+
+        $manager->flush();
+    }
+}

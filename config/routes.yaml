@@ -1,0 +1,17 @@
+controllers:
+    resource:
+        path: ../src/Controller/
+        namespace: App\Controller
+    type: attribute
+
+bninefilesbundle:
+    resource: '@BnineFilesBundle/config/routes.yaml'
+    prefix: '/bninefiles'
+
+bninemdeditorbundle:
+    resource: '@BnineMdEditorBundle/config/routes.yaml'
+    prefix: '/bninemdeditor'
+
+mcp:
+    resource: .
+    type: mcp

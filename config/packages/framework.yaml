@@ -1,0 +1,25 @@
+# see https://symfony.com/doc/current/reference/configuration/framework.html
+framework:
+    secret: '%env(APP_SECRET)%'
+    csrf_protection: true
+
+    # Proxies de confiance : renseigner TRUSTED_PROXIES (IP/CIDR des proxies)
+    # uniquement quand l'app est servie derrière un reverse proxy.
+    trusted_proxies: '%env(TRUSTED_PROXIES)%'
+    trusted_headers: ['x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-forwarded-port']
+
+    # Note that the session will be started ONLY if you read or write from it.
+    session:
+        enabled: true
+        handler_id: null
+        cookie_secure: auto
+
+
+    #esi: true
+    #fragments: true
+
+when@test:
+    framework:
+        test: true
+        session:
+            storage_factory_id: session.storage.factory.mock_file

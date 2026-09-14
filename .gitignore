@@ -1,0 +1,22 @@
+/.env.local
+/.env.local.php
+/.env.*.local
+/config/secrets/prod/prod.decrypt.private.php
+/public/bundles/
+/public/uploads/
+/uploads/
+/var/
+/vendor/
+/volume/
+/compose.override.yaml
+/.vscode
+/phpunit.xml
+.phpunit.result.cache
+phpstan.neon
+/.php-cs-fixer.php
+/.php-cs-fixer.cache
+
+###> phpunit/phpunit ###
+/phpunit.xml
+/.phpunit.cache/
+###< phpunit/phpunit ###

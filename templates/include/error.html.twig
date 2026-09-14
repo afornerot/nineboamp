@@ -1,0 +1,15 @@
+{% for message in app.flashes('error') %}
+    <div class="alert alert-danger mt-3">
+        {{ message }}
+    </div>
+{% endfor %}
+
+{% if form.vars.errors is not empty %}
+    <div class="alert alert-danger mt-3">
+        <ul class="mb-0">
+            {% for error in form.vars.errors %}
+                <li>{{ error.message }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+{% endif %}

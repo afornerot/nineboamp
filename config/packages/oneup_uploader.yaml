@@ -1,0 +1,4 @@
+oneup_uploader:
+    mappings:
+        bninefile:
+            frontend: dropzone

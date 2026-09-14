@@ -1,0 +1,8 @@
+{# Bouton de suppression : mini-form POST autonome avec token CSRF. #}
+{# À placer HORS de tout form principal (pas de <form> imbriqué). #}
+{# Paramètres : route (nom Symfony), id, tokenId (ex. 'delete-user5'), #}
+{#              label (optionnel), classes (optionnel, classes CSS du form). #}
+<form method="post" action="{{ path(route, {id: id}) }}" class="delete-button d-inline {{ classes|default('') }}" onsubmit="return confirm('Confirmez-vous la suppression de cet enregistrement ?')">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token(tokenId) }}">
+    <button type="submit" class="btn btn-danger">{{ label|default('Supprimer') }}</button>
+</form>

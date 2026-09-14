@@ -1,0 +1,5 @@
+flysystem:
+    storages:
+        app_storage:
+            local:
+                directory: '%kernel.project_dir%/uploads'

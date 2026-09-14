@@ -1,0 +1,193 @@
+/* ==== DARK THEMES ==== */
+
+.selbg-darkblue {
+    background-color: #0d6efd;
+    color: #ffffff;
+}
+
+.selbg-darkindigo {
+    background-color: #6610f2;
+    color: #ffffff;
+}
+
+.selbg-darkpurple {
+    background-color: #6f42c1;
+    color: #ffffff;
+}
+
+.selbg-darkpink {
+    background-color: #d63384;
+    color: #ffffff;
+}
+
+.selbg-darkred {
+    background-color: #dc3545;
+    color: #ffffff;
+}
+
+.selbg-darkorange {
+    background-color: #fd7e14;
+    color: #000000;
+}
+
+.selbg-darkyellow {
+    background-color: #ffc107;
+    color: #000000;
+}
+
+.selbg-darkgreen {
+    background-color: #198754;
+    color: #ffffff;
+}
+
+.selbg-darkteal {
+    background-color: #20c997;
+    color: #000000;
+}
+
+.selbg-darkcyan {
+    background-color: #0dcaf0;
+    color: #000000;
+}
+
+.selbg-darkgray {
+    background-color: #343a40;
+    color: #ffffff;
+}
+
+.selbg-darkbrown {
+    background-color: #5c4033;
+    color: #ffffff;
+}
+
+.selbg-darknavy {
+    background-color: #001f3f;
+    color: #ffffff;
+}
+
+.selbg-darkmaroon {
+    background-color: #800000;
+    color: #ffffff;
+}
+
+.selbg-darkolive {
+    background-color: #3d9970;
+    color: #ffffff;
+}
+
+.selbg-darksteel {
+    background-color: #2f4f4f;
+    color: #ffffff;
+}
+
+.selbg-darkcharcoal {
+    background-color: #222222;
+    color: #ffffff;
+}
+
+.selbg-darksmoke {
+    background-color: #555555;
+    color: #ffffff;
+}
+
+.selbg-darkforest {
+    background-color: #228B22;
+    color: #ffffff;
+}
+
+.selbg-darkmidnight {
+    background-color: #191970;
+    color: #ffffff;
+}
+
+/* ==== LIGHT THEMES ==== */
+
+.selbg-lightblue {
+    background-color: #cfe2ff;
+    color: #084298;
+}
+
+.selbg-lightindigo {
+    background-color: #e0ccff;
+    color: #52057f;
+}
+
+.selbg-lightpurple {
+    background-color: #e2d9f3;
+    color: #4c287b;
+}
+
+.selbg-lightpink {
+    background-color: #f7d6e6;
+    color: #6f042e;
+}
+
+.selbg-lightred {
+    background-color: #f8d7da;
+    color: #842029;
+}
+
+.selbg-lightorange {
+    background-color: #ffe5b4;
+    color: #7f3f00;
+}
+
+.selbg-lightyellow {
+    background-color: #fff3cd;
+    color: #664d03;
+}
+
+.selbg-lightgreen {
+    background-color: #d1e7dd;
+    color: #0f5132;
+}
+
+.selbg-lightteal {
+    background-color: #d2f4ea;
+    color: #0f625d;
+}
+
+.selbg-lightcyan {
+    background-color: #cff4fc;
+    color: #055160;
+}
+
+.selbg-lightgray {
+    background-color: #f8f9fa;
+    color: #212529;
+}
+
+.selbg-lightlinen {
+    background-color: #faf0e6;
+    color: #333333;
+}
+
+.selbg-lightbeige {
+    background-color: #f5f5dc;
+    color: #222222;
+}
+
+.selbg-lightmint {
+    background-color: #e6fff5;
+    color: #225e4c;
+}
+
+.selbg-lightlavender {
+    background-color: #e6e6fa;
+    color: #3f3f7f;
+}
+
+.selbg-lightsky {
+    background-color: #e0f7ff;
+    color: #004466;
+}
+
+.selbg-lightrose {
+    background-color: #ffe0e9;
+    color: #75002f;
+}
+
+.selbg-lightice {
+    background-color: #f0ffff;
+    color: #003b4d;
+}

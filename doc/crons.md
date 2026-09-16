@@ -19,7 +19,7 @@ supercronic (chaque minute) ──> app:cron ──> table cron ──> exécute
 - Un cron resté bloqué en "exécution en cours" plus d'une heure (crash
   précédent) est recalé automatiquement en "à exécuter"
 - Les logs sont dans `var/log/cron.log`
-- Gestion via l'interface admin : http://localhost:8001/admin/cron
+- Gestion via l'interface admin : http://localhost:8024/admin/cron
 
 ## Ajouter un cron
 
@@ -47,3 +47,14 @@ Champs disponibles : `command`, `description`, `statut`, `repeatcall`,
 
 Exemple de référence inclus : `app:bonjour` (désactivé par défaut, à activer
 depuis l'admin).
+
+## Worker Messenger (async)
+
+Les messages async (transports `doctrine://default?auto_setup=0`) sont
+consommés par un worker lancé en parallèle des crons :
+
+- `messenger:consume async` traite notamment les `IndexMarketMessage`
+  déclenchés par les uploads / suppressions de fichiers ([doc/amoxtli.md](amoxtli.md)).
+- Démarrage dans `misc/script/reconfigure.sh` (via `supervisord` ou
+  `nohup` selon le contexte Docker).
+- Vérifier l'état via `php bin/console messenger:stats`.

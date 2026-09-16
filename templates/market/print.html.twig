@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Dossier marché — {{ market.idweb }}</title>
+    <style>
+        @page { margin: 1.5cm; size: A4; }
+        * { box-sizing: border-box; }
+        body {
+            font-family: DejaVu Sans, Arial, Helvetica, sans-serif;
+            font-size: 8.5pt;
+            color: #1a1a1a;
+            line-height: 1.5;
+            margin: 0;
+            padding: 0;
+        }
+        h1 {
+            font-size: 16pt;
+            margin: 0 0 4pt 0;
+            color: #111;
+        }
+        h2 {
+            font-size: 12pt;
+            margin: 18pt 0 6pt 0;
+            padding-bottom: 3pt;
+            border-bottom: 1.5pt solid #333;
+            color: #111;
+            text-transform: uppercase;
+            letter-spacing: 0.5pt;
+        }
+        .header {
+            border-bottom: 2pt solid #111;
+            padding-bottom: 8pt;
+            margin-bottom: 12pt;
+        }
+        .header .subtitle {
+            font-size: 9pt;
+            color: #555;
+            margin-top: 2pt;
+        }
+        .meta-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 10pt;
+        }
+        .meta-table td {
+            padding: 3pt 6pt;
+            vertical-align: top;
+            border: 0.5pt solid #ccc;
+        }
+        .meta-table td.label {
+            width: 28%;
+            font-weight: bold;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        .badge {
+            display: inline-block;
+            padding: 1pt 6pt;
+            border-radius: 3pt;
+            font-weight: bold;
+            font-size: 9pt;
+            color: #fff;
+        }
+        .badge-a { background-color: #198754; }
+        .badge-b { background-color: #ffc107; color: #333; }
+        .badge-c { background-color: #6c757d; }
+        .products-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 6pt;
+        }
+        .products-table th {
+            background-color: #f0f0f0;
+            text-align: left;
+            padding: 4pt 6pt;
+            border: 0.5pt solid #ccc;
+            font-size: 9pt;
+            text-transform: uppercase;
+        }
+        .products-table td {
+            padding: 4pt 6pt;
+            border: 0.5pt solid #ccc;
+            vertical-align: top;
+        }
+        .description, .comment, .explanation {
+            margin-top: 4pt;
+            text-align: justify;
+        }
+        .chat-section {
+            margin-top: 6pt;
+        }
+        .chat-msg {
+            margin-bottom: 8pt;
+            padding: 6pt 10pt;
+            font-size: 8pt;
+            border: 0.5pt solid #ddd;
+        }
+        .chat-user {
+            background-color: #e3f2fd;
+            text-align: right;
+        }
+        .chat-assistant {
+            background-color: #f9f9f9;
+        }
+        .chat-role {
+            font-weight: bold;
+            font-size: 7.5pt;
+            color: #555;
+            margin-bottom: 3pt;
+        }
+        .chat-sources {
+            font-size: 7pt;
+            color: #888;
+            margin-top: 4pt;
+            font-style: italic;
+        }
+        .chat-sources strong { color: #555; }
+        .section { page-break-inside: avoid; }
+        .page-break { page-break-before: always; }
+        .footer {
+            margin-top: 20pt;
+            padding-top: 6pt;
+            border-top: 0.5pt solid #ccc;
+            font-size: 8pt;
+            color: #999;
+            text-align: center;
+        }
+        pre, code {
+            font-family: DejaVu Sans Mono, Courier New, monospace;
+            font-size: 8.5pt;
+            background-color: #f8f8f8;
+            padding: 1pt 3pt;
+            border: 0.5pt solid #eee;
+        }
+        pre { padding: 6pt; white-space: pre-wrap; word-break: break-word; }
+        .chat-msg h1, .chat-msg h2, .chat-msg h3, .chat-msg h4 {
+            font-size: 9pt;
+            margin: 6pt 0 3pt 0;
+            color: #111;
+        }
+        .chat-msg h1 { font-size: 11pt; }
+        .chat-msg h2 { font-size: 10pt; border-bottom: 0.5pt solid #ccc; padding-bottom: 2pt; }
+        .chat-msg ul, .chat-msg ol {
+            margin: 4pt 0;
+            padding-left: 16pt;
+        }
+        .chat-msg li { margin-bottom: 2pt; }
+        .chat-msg table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 6pt 0;
+            font-size: 7.5pt;
+            table-layout: fixed;
+        }
+        .chat-msg table th {
+            background-color: #e8e8e8;
+            text-align: left;
+            padding: 4pt 5pt;
+            border: 0.5pt solid #999;
+            font-weight: bold;
+            word-wrap: break-word;
+        }
+        .chat-msg table td {
+            padding: 4pt 5pt;
+            border: 0.5pt solid #999;
+            vertical-align: top;
+            word-wrap: break-word;
+        }
+        .chat-msg blockquote {
+            border-left: 2pt solid #ccc;
+            margin: 4pt 0;
+            padding: 2pt 8pt;
+            color: #555;
+            font-style: italic;
+        }
+        .chat-msg p { margin: 4pt 0; }
+        .chat-msg strong { font-weight: bold; }
+        .chat-msg em { font-style: italic; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>Dossier Marche Public</h1>
+    <div class="subtitle">
+        {{ market.title }}
+    </div>
+    <div class="subtitle" style="margin-top: 4pt;">
+        IDWEB: {{ market.idweb }} | Source: {{ market.url ?? 'N/A' }} | Imprime le: {{ "now"|date("d/m/Y H:i") }}
+    </div>
+</div>
+
+<h2>Informations</h2>
+<table class="meta-table">
+    <tr>
+        <td class="label">Acheteur</td>
+        <td>{{ market.buyer ?: 'Non disponible' }}</td>
+    </tr>
+    <tr>
+        <td class="label">Deadline</td>
+        <td>{{ market.deadline ? market.deadline|date('d/m/Y') : 'Non disponible' }}</td>
+    </tr>
+    <tr>
+        <td class="label">Montant</td>
+        <td>{{ market.amount ?: 'Non disponible' }}</td>
+    </tr>
+    <tr>
+        <td class="label">Score</td>
+        <td>
+            {{ market.score ?? 'N/A' }}/100
+            {% if market.priority %}
+                — Priorite:
+                {% if market.priority == 'A' %}<span class="badge badge-a">A</span>
+                {% elseif market.priority == 'B' %}<span class="badge badge-b">B</span>
+                {% else %}<span class="badge badge-c">C</span>{% endif %}
+            {% endif %}
+        </td>
+    </tr>
+    <tr>
+        <td class="label">Statut</td>
+        <td>{{ market.statuslabel }}</td>
+    </tr>
+    <tr>
+        <td class="label">Cree le</td>
+        <td>{{ market.createdAt ? market.createdAt|date('d/m/Y H:i') : 'N/A' }}</td>
+    </tr>
+</table>
+
+<h2>Description</h2>
+<div class="description">
+    {% if market.description %}
+        {{ market.description|nl2br }}
+    {% else %}
+        <em>Non disponible</em>
+    {% endif %}
+</div>
+
+{% if market.explanation %}
+<h2>Analyse IA</h2>
+<div class="explanation">{{ market.explanation }}</div>
+{% endif %}
+
+{% if products is not empty %}
+<h2 class="page-break">Produits Associes</h2>
+<table class="products-table">
+    <thead>
+        <tr>
+            <th style="width: 8%;">Score</th>
+            <th style="width: 14%;">Priorite</th>
+            <th style="width: 18%;">Produit</th>
+            <th>Pertinence</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for mp in products %}
+        <tr>
+            <td><strong>{{ mp.score ?? 'N/A' }}/100</strong></td>
+            <td>
+                {% if mp.priority == 'A' %}<span class="badge badge-a">A</span>
+                {% elseif mp.priority == 'B' %}<span class="badge badge-b">B</span>
+                {% else %}<span class="badge badge-c">C</span>{% endif %}
+            </td>
+            <td>{{ mp.product ? mp.product.name : 'N/A' }}</td>
+            <td>{{ mp.relevance ?: '-' }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+{% if market.comment %}
+<h2>Commentaire</h2>
+<div class="comment">{{ market.comment|gfm_to_html }}</div>
+{% endif %}
+
+{% if chatMessages is not empty %}
+<h2 class="page-break">Conversation IA</h2>
+<div class="chat-section">
+    {% for msg in chatMessages %}
+        {% if msg.role == 'user' %}
+            <div class="chat-msg chat-user">
+                <div class="chat-role">Vous</div>
+                {{ msg.content }}
+            </div>
+        {% else %}
+            <div class="chat-msg chat-assistant">
+                <div class="chat-role">Assistant IA</div>
+                {{ msg.content|gfm_to_html }}
+                {% if msg.sources is not empty %}
+                    <div class="chat-sources"><strong>Sources:</strong> {{ msg.sources|join(', ') }}</div>
+                {% endif %}
+            </div>
+        {% endif %}
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="footer">
+    Dossier genere automatiquement via Cadoles (cadoles.com) — Marche {{ market.idweb }}
+</div>
+
+</body>
+</html>

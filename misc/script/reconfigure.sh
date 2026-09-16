@@ -16,11 +16,14 @@ bin/console app:init
 supercronic -quiet -no-reap /crontab &
 SUPERCRONIC_PID=$!
 
+bin/console messenger:consume async --time-limit=3600 --memory-limit=128M &
+MESSENGER_PID=$!
+
 "$@" &
 APACHE_PID=$!
 
 graceful_stop() {
-    kill -TERM "$SUPERCRONIC_PID" "$APACHE_PID" 2>/dev/null || true
+    kill -TERM "$SUPERCRONIC_PID" "$APACHE_PID" "$MESSENGER_PID" 2>/dev/null || true
     wait
     exit 0
 }
@@ -35,8 +38,12 @@ while true; do
         echo "$(date '+%F %T') STOP APACHE" >> var/log/startup.log
         break
     fi
+    if ! kill -0 "$MESSENGER_PID" 2>/dev/null; then
+        echo "$(date '+%F %T') STOP MESSENGER" >> var/log/startup.log
+        break
+    fi
     sleep 2
 done
 
-kill -TERM "$SUPERCRONIC_PID" "$APACHE_PID" 2>/dev/null || true
+kill -TERM "$SUPERCRONIC_PID" "$APACHE_PID" "$MESSENGER_PID" 2>/dev/null || true
 wait

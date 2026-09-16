@@ -1,0 +1,57 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}= {{ title }}{% endblock %}
+
+{% block body %}
+    <h1>{{ title }}</h1>
+
+    <div class="position-relative">
+        {% if mode == 'update' %}{% include 'include/delete_button.html.twig' with {route: routedelete, id: form.vars.value.id, tokenId: 'delete-product' ~ form.vars.value.id, classes: 'delete-abs'} %}{% endif %}
+
+        {{ form_start(form) }}
+
+        {{ form_widget(form.submit) }}
+        <a href="{{ path(routecancel) }}" class="btn btn-secondary ms-1">Annuler</a>
+
+        {% include('include/error.html.twig') %}
+
+        <div class="row">
+            <div class="col-md-6 mx-auto">
+                <div class="card mt-3">
+                    <div class="card-header">Informations</div>
+                    <div class="card-body">
+                        {{ form_row(form.name) }}
+                        {{ form_row(form.description) }}
+                        {{ form_label(form.keywords) }}
+                        {{ form_widget(form.keywords) }}
+                        {{ form_errors(form.keywords) }}
+                        <small class="form-text text-muted">Si vide, les mots-clés, les secteurs et la description courte seront extraits automatiquement de la fiche via l'IA.</small><br>
+                        {{ form_label(form.sectors) }}
+                        {{ form_widget(form.sectors) }}
+                        {{ form_errors(form.sectors) }}
+                        <small class="form-text text-muted">Si vide, les secteurs seront extraits automatiquement de la fiche via l'IA.</small><br>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-12">
+                <div class="card mt-3">
+                    <div class="card-header">Fiche produit (Markdown)</div>
+                    <div class="card-body">
+                        {{ form_row(form.fiche) }}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {{ form_end(form) }}
+    </div>
+{% endblock %}
+
+{% block localscript %}
+    <script>
+        $(document).ready(function() {
+            $("#product_name").focus();
+        });
+    </script>
+{% endblock %}

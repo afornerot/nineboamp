@@ -18,6 +18,13 @@ class CronFixtures extends Fixture
                 'repeatexec' => 0,
                 'repeatinterval' => 60,
             ],
+            'app:boamp:search' => [
+                'description' => 'Recherche et qualification quotidienne des opportunités BOAMP',
+                'statut' => Cron::STATUT_TODO,
+                'repeatcall' => 0,
+                'repeatexec' => 0,
+                'repeatinterval' => 86400,
+            ],
         ];
 
         foreach ($crons as $command => $item) {

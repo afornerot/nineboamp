@@ -8,6 +8,7 @@ use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
 class FileVoter extends AbstractFileVoter
 {
     private const PUBLIC_DOMAINS = ['avatar', 'logo'];
+    private const BOAMP_DOMAIN = 'boamp';
 
     /**
      * @param int|string $id
@@ -16,6 +17,10 @@ class FileVoter extends AbstractFileVoter
     {
         if (in_array($domain, self::PUBLIC_DOMAINS)) {
             return true;
+        }
+
+        if (self::BOAMP_DOMAIN === $domain) {
+            return $token->getUser() !== null;
         }
 
         return $this->canManage($domain, $id, $token);

@@ -13,7 +13,7 @@ class SecurityTest extends WebTestCase
         $client = static::createClient();
         $client->request('GET', '/');
 
-        $this->assertResponseIsSuccessful();
+        $this->assertResponseRedirects('/user/market');
     }
 
     public function testAnonymousAdminRedirectsToLogin(): void

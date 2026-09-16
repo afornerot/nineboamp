@@ -11,10 +11,7 @@ class HomeController extends AbstractController
     #[Route('/', name: 'app_home')]
     public function home(): Response
     {
-        return $this->render('home/home.html.twig', [
-            'usemenu' => true,
-            'usesidebar' => false,
-        ]);
+        return $this->redirectToRoute('app_market_list');
     }
 
     #[Route('/admin', name: 'app_admin')]

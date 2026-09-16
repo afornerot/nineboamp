@@ -19,21 +19,21 @@
         <link rel="stylesheet" href="{{ asset('lib/app/selbg.css') }}">
         <link rel="stylesheet" href="{{ asset('bundles/bninefiles/css/bninefiles.css') }}">
 
-        <script defer src="{{ asset('lib/jquery/jquery.min.js')  }}"></script>
-        <script defer src="{{ asset('lib/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
-        <script defer src="{{ asset('lib/datatables/datatables.min.js') }}"></script>
-        <script defer src="{{ asset('lib/datatables/datatables.init.js') }}"></script>
-        <script defer src="{{ asset('lib/select2/select2.min.js') }}"></script>
-        <script defer src="{{ asset('lib/select2/select2.init.js') }}"></script>
-        <script defer src="{{ asset('lib/dropzone/dropzone.min.js') }}"></script>
-        <script defer src="{{ asset('lib/imgareaselect/js/jquery.imgareaselect.dev.js') }}"></script>
-        <script defer src="{{ asset('lib/jqueryui/jquery-ui.min.js') }}"></script>
-        <script defer src="{{ asset('lib/chart/chart.js') }}"></script>
-        <script defer src="{{ asset('lib/marked/marked.min.js') }}"></script>
+        <script src="{{ asset('lib/jquery/jquery.min.js')  }}"></script>
+        <script src="{{ asset('lib/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
+        <script src="{{ asset('lib/datatables/datatables.min.js') }}"></script>
+        <script src="{{ asset('lib/datatables/datatables.init.js') }}"></script>
+        <script src="{{ asset('lib/select2/select2.min.js') }}"></script>
+        <script src="{{ asset('lib/select2/select2.init.js') }}"></script>
+        <script src="{{ asset('lib/dropzone/dropzone.min.js') }}"></script>
+        <script src="{{ asset('lib/imgareaselect/js/jquery.imgareaselect.dev.js') }}"></script>
+        <script src="{{ asset('lib/jqueryui/jquery-ui.min.js') }}"></script>
+        <script src="{{ asset('lib/chart/chart.js') }}"></script>
+        <script src="{{ asset('lib/marked/marked.min.js') }}"></script>
 
-        <script defer src="{{ asset('bundles/bninemdeditor/bninemdeditor.js') }}"></script>
-        <script defer src="{{ asset('bundles/bninefiles/js/bninefiles.js') }}"></script>
-        <script defer src="{{ asset('lib/app/app.js') }}"></script>
+        <script src="{{ asset('bundles/bninemdeditor/bninemdeditor.js') }}"></script>
+        <script src="{{ asset('bundles/bninefiles/js/bninefiles.js') }}"></script>
+        <script src="{{ asset('lib/app/app.js') }}"></script>
 
         {% block javascripts %}
 
@@ -52,6 +52,11 @@
                     </a>
 
                     <div class="collapse navbar-collapse" id="navbarColor02">
+                        <ul class="navbar-nav me-auto">
+                            <li class="nav-item"><a class="nav-link" href="{{ path('app_market_list') }}"><i class="fas fa-gavel fa-fw"></i> Marchés</a></li>
+                            <li class="nav-item"><a class="nav-link" href="{{ path('app_product_list') }}"><i class="fas fa-box fa-fw"></i> Produits</a></li>
+                            <li class="nav-item"><a class="nav-link" href="{{ path('app_report_list') }}"><i class="fas fa-chart-bar fa-fw"></i> Rapports</a></li>
+                        </ul>
                     </div>
 
                     <div class="navbar-nav ms-auto ps-3 d-flex flex-row align-items-center position-absolute" style="right: 15px; top:15px">
@@ -79,7 +84,7 @@
                             <span>ADMINISTRATION</span>
                             <a href="{{ path('app_admin_user') }}" title="Utilisateurs">
                                 <i class="fas fa-user fa-fw"></i>
-                                <span>Utilisateurs</span>
+                                <span>Utiilisateurs</span>
                             </a>
                             <a href="{{ path('app_admin_groupe') }}" title="Groupes">
                                 <i class="fas fa-users fa-fw"></i>
@@ -88,6 +93,10 @@
                             <a href="{{ path('app_admin_cron') }}" title="Crons">
                                 <i class="fas fa-clock fa-fw"></i>
                                 <span>Crons</span>
+                            </a>
+                            <a href="{{ path('app_admin_scoring_prompt') }}" title="Prompt Scoring">
+                                <i class="fas fa-brain fa-fw"></i>
+                                <span>Prompt Scoring</span>
                             </a>
                         {% endif %}
                     </div>
@@ -124,8 +133,8 @@
                 </div>
             </div>
         </div>
-    </body>
 
     {% block localscript %}
     {% endblock %}
+    </body>
 </html>

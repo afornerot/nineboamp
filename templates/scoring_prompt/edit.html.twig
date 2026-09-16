@@ -1,0 +1,55 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}= {{ title }}{% endblock %}
+
+{% block body %}
+    <h1>{{ title }}</h1>
+
+    <div class="position-relative">
+        {% if prompts|length > 1 %}
+            <div class="mb-3">
+                <label class="form-label">Sélectionner le prompt à éditer</label>
+                <select class="form-select" onchange="window.location.href=this.value">
+                    {% for prompt in prompts %}
+                        <option value="{{ path('app_admin_scoring_prompt_edit', {sourceFile: prompt.sourceFile}) }}"
+                                {% if prompt.id == selected.id %}selected{% endif %}>
+                            {{ prompt.sourceFile ?: '(sans nom)' }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+        {% endif %}
+
+        {{ form_start(form) }}
+
+        {{ form_widget(form.submit) }}
+        <a href="{{ path(routecancel) }}" class="btn btn-secondary ms-1">Annuler</a>
+
+        {% include('include/error.html.twig') %}
+
+        <div class="card mt-3">
+            <div class="card-header">
+                Prompt <code>{{ selected.sourceFile ?: '(sans nom)' }}</code>
+                <small class="text-muted ms-2">— fichier source : <code>src/DataFixtures/data/scoring/{{ selected.sourceFile ?: 'prompt' }}.md</code></small>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small">
+                    Ce prompt est utilisé par le service de scoring IA pour qualifier les marchés publics.
+                    Il est configurable via ce formulaire et pris en compte à chaque exécution de <code>app:boamp:search</code>.
+                </p>
+
+                {{ form_row(form.role) }}
+            </div>
+        </div>
+
+        {{ form_end(form) }}
+    </div>
+{% endblock %}
+
+{% block localscript %}
+    <script>
+        $(document).ready(function() {
+            $("#scoring_prompt_role").focus();
+        });
+    </script>
+{% endblock %}

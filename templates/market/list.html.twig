@@ -1,0 +1,190 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}= {{ title }}{% endblock %}
+
+{% block body %}
+<h1>{{ title }}</h1>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex gap-2 align-items-center">
+        <div class="btn-group" id="priority-filter" role="group">
+            <button type="button" class="btn btn-outline-secondary active" data-filter="all">Tous</button>
+            <button type="button" class="btn btn-outline-success" data-filter="A">A</button>
+            <button type="button" class="btn btn-outline-warning" data-filter="AB">A + B</button>
+            <button type="button" class="btn btn-outline-secondary" data-filter="ABC">A + B + C</button>
+        </div>
+        <div class="dropdown" id="status-filter">
+            <button class="btn btn-outline-primary dropdown-toggle" type="button" id="status-filter-btn" data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="fas fa-filter"></i> Statuts <span class="badge bg-primary ms-1" id="status-filter-count">0</span>
+            </button>
+            <ul class="dropdown-menu p-2" aria-labelledby="status-filter-btn" style="min-width: 200px;">
+                <li><button type="button" class="btn btn-sm btn-link" id="status-filter-all">Tout cocher</button> | <button type="button" class="btn btn-sm btn-link" id="status-filter-none">Tout décocher</button></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="Detecté"> Detecté</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="Qualifié"> Qualifié</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="Go"> Go</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="À étudier"> À étudier</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="Nogo"> Nogo</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="Répondu"> Répondu</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="Gagné"> Gagné</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="Perdu"> Perdu</label></li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<div class="dataTable_wrapper">
+    <table class="table table-striped table-bordered table-hover" id="dataTables" style="width:100%" data-order-col="1" data-order-dir="desc">
+        <thead>
+            <tr>
+                <th width="70px" class="no-sort">Action</th>
+                <th>Score</th>
+                <th>Priorité</th>
+                <th>Titre</th>
+                <th>Acheteur</th>
+                <th>Statut</th>
+                <th>Montant</th>
+                <th>Produits</th>
+                <th>Deadline</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for market in markets %}
+            <tr>
+                <td><a href="{{ path('app_market_show', {id: market.id}) }}"><i class="fas fa-file fa-2x"></i></a></td>
+                <td>{{ market.score is not null ? market.score ~ '/100' : '?' }}</td>
+                <td data-priority="{{ market.priority }}">
+                    {% if market.priority == 'A' %}<span class="badge bg-success">{{ market.priority }}</span>
+                    {% elseif market.priority == 'B' %}<span class="badge bg-warning">{{ market.priority }}</span>
+                    {% else %}<span class="badge bg-secondary">{{ market.priority }}</span>{% endif %}
+                </td>
+                <td>{{ market.title|length > 60 ? market.title|slice(0, 60) ~ '…' : market.title }}</td>
+                <td>{{ market.buyer|length > 30 ? market.buyer|slice(0, 30) ~ '…' : market.buyer }}</td>
+                <td><span class="badge bg-info">{{ market.statuslabel }}</span></td>
+                <td>{{ market.amount ?: '?' }}</td>
+                <td>
+                    {% set sorted = market.marketProducts|sort((a, b) => b.score <=> a.score) %}
+                    {% for mp in sorted|slice(0, 3) %}
+                        {{ mp.product.name }} ({{ mp.score ?? '?' }}){% if not loop.last %} · {% endif %}
+                    {% endfor %}
+                </td>
+                <td>{{ market.deadline ? market.deadline|date('d/m/Y') : '?' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if markets|length == 0 %}
+        <div class="text-center text-muted mt-3">Aucun marché. Lancez la recherche via le cron ou la commande <code>app:boamp:search</code>.</div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block localscript %}
+    <script>
+        $(document).ready(function() {
+            var priorityKey = 'market_priority_filter';
+            var statusKey = 'market_status_filter';
+            var allowedFilters = {all: null, A: ['A'], AB: ['A', 'B'], ABC: ['A', 'B', 'C']};
+            var table = document.getElementById('dataTables');
+            if (!table || typeof jQuery === 'undefined') return;
+            if (!jQuery.fn.DataTable.isDataTable(table)) return;
+            var dt = jQuery(table).DataTable();
+
+            var currentPriorities = null;
+            var currentStatuses = [];
+
+            function drawTable() {
+                if (!currentPriorities) {
+                    dt.column(2).search('', false);
+                } else {
+                    var regex = '^(' + currentPriorities.join('|') + ')$';
+                    dt.column(2).search(regex, true, false);
+                }
+                if (currentStatuses.length === 0) {
+                    dt.column(5).search('', false);
+                } else {
+                    var escaped = currentStatuses.map(function(s) {
+                        return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    });
+                    var statusRegex = '^(' + escaped.join('|') + ')$';
+                    dt.column(5).search(statusRegex, true, false);
+                }
+                dt.draw();
+            }
+
+            function applyPriorityFilter(code) {
+                currentPriorities = allowedFilters[code] || null;
+                document.querySelectorAll('#priority-filter .btn').forEach(function(btn) {
+                    btn.classList.remove('active');
+                });
+                var activeBtn = document.querySelector('#priority-filter .btn[data-filter="' + code + '"]');
+                if (activeBtn) activeBtn.classList.add('active');
+                localStorage.setItem(priorityKey, code);
+                drawTable();
+            }
+
+            function applyStatusFilter() {
+                var checkboxes = document.querySelectorAll('#status-filter input[type="checkbox"]');
+                currentStatuses = [];
+                checkboxes.forEach(function(cb) {
+                    if (cb.checked) {
+                        currentStatuses.push(cb.value);
+                    }
+                });
+                var countEl = document.getElementById('status-filter-count');
+                if (countEl) {
+                    countEl.textContent = currentStatuses.length;
+                    countEl.style.display = currentStatuses.length > 0 ? '' : 'none';
+                }
+                localStorage.setItem(statusKey, JSON.stringify(currentStatuses));
+                drawTable();
+            }
+
+            document.querySelectorAll('#priority-filter .btn').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    applyPriorityFilter(this.getAttribute('data-filter'));
+                });
+            });
+
+            document.querySelectorAll('#status-filter input[type="checkbox"]').forEach(function(cb) {
+                cb.addEventListener('change', applyStatusFilter);
+            });
+
+            document.getElementById('status-filter-all').addEventListener('click', function() {
+                document.querySelectorAll('#status-filter input[type="checkbox"]').forEach(function(cb) {
+                    cb.checked = true;
+                });
+                applyStatusFilter();
+            });
+
+            document.getElementById('status-filter-none').addEventListener('click', function() {
+                document.querySelectorAll('#status-filter input[type="checkbox"]').forEach(function(cb) {
+                    cb.checked = false;
+                });
+                applyStatusFilter();
+            });
+
+            var savedPriority = localStorage.getItem(priorityKey);
+            if (savedPriority && allowedFilters.hasOwnProperty(savedPriority)) {
+                applyPriorityFilter(savedPriority);
+            }
+
+            var savedStatus = localStorage.getItem(statusKey);
+            if (savedStatus) {
+                try {
+                    var statuses = JSON.parse(savedStatus);
+                    if (Array.isArray(statuses) && statuses.length > 0) {
+                        document.querySelectorAll('#status-filter input[type="checkbox"]').forEach(function(cb) {
+                            cb.checked = statuses.indexOf(cb.value) !== -1;
+                        });
+                        applyStatusFilter();
+                    }
+                } catch (e) {}
+            } else {
+                var countEl = document.getElementById('status-filter-count');
+                if (countEl) countEl.style.display = 'none';
+            }
+        });
+    </script>
+{% endblock %}

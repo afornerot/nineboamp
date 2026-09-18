@@ -10,7 +10,6 @@ use App\Repository\BoampReportRepository;
 use App\Repository\MarketProductRepository;
 use App\Repository\MarketRepository;
 use App\Repository\ProductRepository;
-use App\Repository\ScoringPromptRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
@@ -28,7 +27,6 @@ class BoampFinderService
         private ProductRepository $productRepository,
         private MarketRepository $marketRepository,
         private MarketProductRepository $marketProductRepository,
-        private ScoringPromptRepository $scoringPromptRepository,
         private BoampReportRepository $reportRepository,
         private ProductMetadataExtractor $metadataExtractor,
         private PromptLoader $promptLoader,
@@ -385,13 +383,12 @@ class BoampFinderService
     private function getScoringRole(): string
     {
         $filePrompt = $this->promptLoader->renderSystem('scoring.role');
+        
         if ('' !== $filePrompt) {
             return $filePrompt;
         }
 
-        $dbPrompt = $this->scoringPromptRepository->findLatest();
-
-        return $dbPrompt?->getRole() ?? 'Tu es un expert en qualification de marchés publics français (BOAMP). Pour chaque marché, tu évalues la correspondance avec les produits de l\'entreprise.';
+        throw new \RuntimeException('Prompt scoring.role.md not found in src/DataFixtures/data/scoring/');
     }
 
     /**

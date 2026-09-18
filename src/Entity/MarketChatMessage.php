@@ -27,6 +27,9 @@ class MarketChatMessage
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $sources = null;
 
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $debugData = null;
+
     #[ORM\Column(nullable: true)]
     private ?\DateTime $createdAt = null;
 
@@ -84,6 +87,18 @@ class MarketChatMessage
     public function setSources(?array $sources): static
     {
         $this->sources = $sources;
+
+        return $this;
+    }
+
+    public function getDebugData(): ?array
+    {
+        return $this->debugData;
+    }
+
+    public function setDebugData(?array $debugData): static
+    {
+        $this->debugData = $debugData;
 
         return $this;
     }

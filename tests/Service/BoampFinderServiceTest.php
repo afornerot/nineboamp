@@ -99,7 +99,6 @@ class BoampFinderServiceTest extends TestCase
             $this->createMock(\App\Repository\ProductRepository::class),
             $this->createMock(\App\Repository\MarketRepository::class),
             $this->createMock(\App\Repository\MarketProductRepository::class),
-            $this->createMock(\App\Repository\ScoringPromptRepository::class),
             $this->createMock(\App\Repository\BoampReportRepository::class),
             $this->createMock(ProductMetadataExtractor::class),
             $this->createMock(\App\Service\PromptLoader::class),

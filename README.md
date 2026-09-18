@@ -34,10 +34,10 @@ automatiquement (login = `APP_ADMIN`, mot de passe = `APP_SECRET`).
 |-------|-------------|-----|
 | **Détection BOAMP** | Cron quotidien qui scrape BOAMP (OpenDataSoft) et détecte les marchés correspondants à vos produits | [doc/boamp.md](doc/boamp.md) |
 | **Scoring IA** | Évaluation automatique 0-100 + priorité A/B/C pour chaque marché, exécutée par un LLM | [doc/ai.md](doc/ai.md) |
-| **Prompts éditables** | Prompts LLM stockés en BDD, éditables via `/admin/scoring-prompt` (pas de redéploiement) | — |
+| **Prompts en fichiers .md** | Prompts LLM stockés dans `src/DataFixtures/data/scoring/*.md` (éditables sans redéploiement) | [doc/ai.md](doc/ai.md) |
 | **Requalification manuelle** | Bouton "Requalifier" sur la page marché pour re-scoring individuel sans recrawler | [doc/boamp.md](doc/boamp.md#requalification-individuelle) |
 | **Indexation Amoxtli** | PDF/DOCX/TXT des pièces jointes indexés via Amoxtli pour RAG | [doc/amoxtli.md](doc/amoxtli.md) |
-| **Chat IA par marché** | Assistant conversationnel RAG sur les documents indexés du marché | [doc/amoxtli.md](doc/amoxtli.md#chat-ia-rag) |
+| **Chat IA agenté** | Assistant conversationnel utilisant un agent LLM avec function calling (accès aux documents + base de données) | [doc/ai.md](doc/ai.md) |
 | **Export PDF** | Génération PDF propre du dossier marché (informations + produits + chat) | — |
 | **Filtres cumulés** | Filtres priorité + statut sur la liste, sauvegardés en localStorage | — |
 | **Gestion fichiers** | Upload / suppression de pièces jointes par marché (bundle BnineFiles) | — |
@@ -61,7 +61,6 @@ La documentation détaillée se trouve dans [doc/](doc/index.md) :
 ## Liens utiles
 
 - Interface marchés : http://localhost:8024/user/market
-- Admin scoring prompts : http://localhost:8024/admin/scoring-prompt
 - Rapports BOAMP : http://localhost:8024/user/report
 - Swagger : http://localhost:8024/v1/api/doc
 - Admin crons : http://localhost:8024/admin/cron

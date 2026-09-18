@@ -23,6 +23,11 @@ class PromptLoader
         $this->promptsDir = $promptsDir;
     }
 
+    public function getPromptsDirectory(): string
+    {
+        return $this->promptsDir;
+    }
+
     /**
      * Charge un prompt par nom (sans extension). Retourne null si introuvable.
      */

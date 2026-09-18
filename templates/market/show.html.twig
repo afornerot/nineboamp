@@ -24,9 +24,7 @@
                 <span>Informations</span>
                 <div>
                     <a href="{{ path('app_market_export_pdf', {id: market.id}) }}" target="_blank" class="btn btn-sm btn-danger" title="Exporter en PDF"><i class="fas fa-file-pdf"></i> PDF</a>
-                    <form method="post" action="{{ path('app_market_rescore', {id: market.id}) }}" class="d-inline" onsubmit="return confirm('Relancer le scoring IA sur ce marché ?')">
-                        <button type="submit" class="btn btn-sm btn-warning" title="Requalifier"><i class="fas fa-sync-alt"></i> Requalifier</button>
-                    </form>
+                    <button type="button" id="btn-rescore" class="btn btn-sm btn-warning" title="Requalifier" onclick="startRescore()"><i class="fas fa-sync-alt"></i> Requalifier</button>
                     <button class="btn btn-sm btn-outline-light" id="btn-toggle-edit" type="button" title="Modifier">
                         <i class="fas fa-pen"></i>
                     </button>
@@ -177,6 +175,11 @@
             <div class="card-header d-flex align-items-center">
                 <i class="fas fa-robot me-2"></i>
                 <span>Assistant</span>
+                {% if is_granted('ROLE_ADMIN') %}
+                <a href="{{ path('app_admin_market_chat_debug', {id: market.id}) }}" class="btn btn-sm btn-outline-secondary ms-auto" target="_blank" title="Debug RAG">
+                    <i class="fas fa-bug"></i>
+                </a>
+                {% endif %}
             </div>
             <div class="card-body flex-grow-1 overflow-auto" id="chat-messages" style="min-height: 0;">
                 <div id="chat-empty" class="text-muted text-center py-5">
@@ -386,8 +389,17 @@
                     innerDiv.insertAdjacentHTML('afterbegin', '<button type="button" class="btn-delete-msg" title="Supprimer ce message"><i class="fas fa-times"></i></button>');
                 }
             }
-            addMessage('assistant', data.reply || 'Erreur de réponse.', data.sources || [], null, data.assistantMessageId || null);
-            setLoading(false);
+
+            if (data.pending && data.jobId) {
+                var assistantDiv = addMessage('assistant', 'Analyse en cours... ⏳', [], null, null);
+                pollForResult(data.jobId, assistantDiv);
+            } else if (data.reply) {
+                addMessage('assistant', data.reply, data.sources || [], null, data.assistantMessageId || null);
+                setLoading(false);
+            } else {
+                addMessage('assistant', 'Erreur de réponse.', [], null, null);
+                setLoading(false);
+            }
         })
         .catch(function() {
             addMessage('assistant', 'Erreur de connexion. Veuillez réessayer.');
@@ -395,20 +407,131 @@
         });
     });
 
+    function pollForResult(jobId, assistantDiv) {
+        fetch('{{ path("app_market_chat_poll", {id: market.id, jobId: "JOB_ID"}) }}'.replace('JOB_ID', jobId), {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.status === 'done') {
+                var innerDiv = assistantDiv.querySelector('div');
+                if (innerDiv) {
+                    innerDiv.innerHTML = renderMarkdown(data.result?.answer || '');
+                }
+                if (!innerDiv.querySelector('.btn-delete-msg')) {
+                    innerDiv.insertAdjacentHTML('afterbegin', '<button type="button" class="btn-delete-msg" title="Supprimer ce message"><i class="fas fa-times"></i></button>');
+                }
+                if (data.assistantMessageId) {
+                    assistantDiv.dataset.messageId = data.assistantMessageId;
+                }
+                setLoading(false);
+            } else if (data.status === 'error') {
+                var innerDiv = assistantDiv.querySelector('div');
+                if (innerDiv) {
+                    innerDiv.innerHTML = '<em style="color: red;">Erreur: ' + escapeHtml(data.result?.error || 'Une erreur est survenue') + '</em>';
+                }
+                setLoading(false);
+            } else {
+                setTimeout(function() { pollForResult(jobId, assistantDiv); }, 2000);
+            }
+        })
+        .catch(function() {
+            var innerDiv = assistantDiv.querySelector('div');
+            if (innerDiv) {
+                innerDiv.innerHTML = '<em style="color: red;">Erreur de connexion.</em>';
+            }
+            setLoading(false);
+        });
+    }
+
     loadHistory();
 })();
 </script>
 
 <script>
+(function() {
+    var rescoreBtn = null;
+    var rescoreOriginalHtml = '';
+    var rescoreMarketId = {{ market.id }};
+
+    function startRescore() {
+        if (!confirm('Relancer le scoring IA sur ce marché ?')) return;
+        if (!rescoreBtn) rescoreBtn = document.getElementById('btn-rescore');
+        rescoreOriginalHtml = rescoreBtn.innerHTML;
+        rescoreBtn.disabled = true;
+        rescoreBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyse en cours...';
+
+        console.log('Starting rescore for market', rescoreMarketId);
+        fetch('/user/market/' + rescoreMarketId + '/rescore', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        })
+        .then(function(r) {
+            console.log('Rescore response status:', r.status);
+            return r.json();
+        })
+        .then(function(data) {
+            console.log('Rescore response data:', data);
+            if (data.pending && data.jobId) {
+                pollRescore(data.jobId);
+            } else if (data.error) {
+                alert('Erreur: ' + data.error);
+                rescoreBtn.disabled = false;
+                rescoreBtn.innerHTML = rescoreOriginalHtml;
+            } else {
+                console.warn('Unexpected rescore response:', data);
+                alert('Réponse inattendue du serveur');
+                rescoreBtn.disabled = false;
+                rescoreBtn.innerHTML = rescoreOriginalHtml;
+            }
+        })
+        .catch(function(err) {
+            console.error('Rescore fetch error:', err);
+            alert('Erreur de connexion: ' + err.message);
+            rescoreBtn.disabled = false;
+            rescoreBtn.innerHTML = rescoreOriginalHtml;
+        });
+    }
+    window.startRescore = startRescore;
+
+    function pollRescore(jobId) {
+        fetch('/user/market/' + rescoreMarketId + '/rescore/poll/' + jobId)
+        .then(function(r) {
+            if (!r.ok) {
+                throw new Error('HTTP ' + r.status);
+            }
+            return r.json();
+        })
+        .then(function(data) {
+            console.log('Poll result:', data);
+            if (data.status === 'done') {
+                rescoreBtn.disabled = false;
+                rescoreBtn.innerHTML = rescoreOriginalHtml;
+                location.reload();
+            } else if (data.status === 'error') {
+                alert('Erreur lors du scoring: ' + (data.error || 'Une erreur est survenue'));
+                rescoreBtn.disabled = false;
+                rescoreBtn.innerHTML = rescoreOriginalHtml;
+            } else if (data.status === 'pending' || data.status === 'not_found') {
+                setTimeout(function() { pollRescore(jobId); }, 2000);
+            }
+        })
+        .catch(function(err) {
+            console.error('Poll error (retrying):', err);
+            setTimeout(function() { pollRescore(jobId); }, 5000);
+        });
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
+        rescoreBtn = document.getElementById('btn-rescore');
+
         var btnToggle = document.getElementById('btn-toggle-edit');
         var btnCancel = document.getElementById('btn-cancel-edit');
         var infoView = document.getElementById('info-view');
         var infoEdit = document.getElementById('info-edit');
         var easyMDEInstance = null;
-
-        var textarea = infoEdit.querySelector('.easymde-textarea');
-        if (textarea) textarea.classList.remove('easymde-textarea');
 
         function initOrRefreshMDE() {
             if (easyMDEInstance) {
@@ -456,37 +579,11 @@
             return size.toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
         }
 
-        function renderIndexedDocs(data) {
-            if (!indexedDocsBody) return;
-            if (!data.available) {
-                indexedDocsBody.innerHTML = '<div class="alert alert-warning mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Le binaire amoxtli n\u2019est pas disponible sur le serveur.</div>';
-                return;
-            }
-            if (!data.initialized) {
-                indexedDocsBody.innerHTML = '<div class="alert alert-info mb-0"><i class="fas fa-info-circle me-2"></i>Workspace amoxtli pas encore initialisé. Uploadez des fichiers pour démarrer l\u2019indexation.</div>';
-                return;
-            }
-            if (!data.documents || data.documents.length === 0) {
-                indexedDocsBody.innerHTML = '<div class="alert alert-info mb-0"><i class="fas fa-info-circle me-2"></i>Workspace initialisé mais aucun fichier indexé.</div>';
-                return;
-            }
-            var html = '<table class="table table-sm mb-0"><thead><tr><th>Fichier</th><th>Type</th><th>Taille</th><th>Indexé le</th></tr></thead><tbody>';
-            data.documents.forEach(function(doc) {
-                var icon = '<i class="fas fa-file-alt me-2"></i>';
-                if (doc.extension === 'pdf') icon = '<i class="fas fa-file-pdf me-2 text-danger"></i>';
-                else if (doc.extension === 'docx' || doc.extension === 'doc') icon = '<i class="fas fa-file-word me-2 text-primary"></i>';
-                else if (doc.extension === 'xlsx' || doc.extension === 'xls') icon = '<i class="fas fa-file-excel me-2 text-success"></i>';
-                else if (doc.extension === 'txt') icon = '<i class="fas fa-file-alt me-2"></i>';
-                html += '<tr>';
-                html += '<td>' + icon + escapeHtml(doc.filename || 'N/A') + '</td>';
-                html += '<td><span class="badge bg-secondary">' + escapeHtml((doc.extension || '?').toUpperCase()) + '</span></td>';
-                html += '<td>' + formatBytes(doc.size) + '</td>';
-                html += '<td><small>' + escapeHtml(doc.indexed_at || '?') + '</small></td>';
-                html += '</tr>';
-            });
-            html += '</tbody></table>';
-            html += '<div class="text-muted small mt-2">' + data.documents.length + ' document(s) indexé(s)</div>';
-            indexedDocsBody.innerHTML = html;
+        function formatDate(isoString) {
+            if (!isoString) return '?';
+            var d = new Date(isoString);
+            if (isNaN(d.getTime())) return isoString;
+            return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear() + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
         }
 
         function escapeHtml(text) {
@@ -496,26 +593,46 @@
             return d.innerHTML;
         }
 
+        function renderIndexedDocs(data) {
+            if (!indexedDocsBody) return;
+            if (!data.available) {
+                indexedDocsBody.innerHTML = '<div class="alert alert-warning mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Le binaire amoxtli n\u2019est pas disponible sur le serveur.</div>';
+                return;
+            }
+            if (!data.initialized) {
+                indexedDocsBody.innerHTML = '<div class="alert alert-info mb-0"><i class="fas fa-info-circle me-2"></i>Workspace amoxtli pas encore initialisé.</div>';
+                return;
+            }
+            if (!data.documents || data.documents.length === 0) {
+                indexedDocsBody.innerHTML = '<div class="alert alert-info mb-0"><i class="fas fa-info-circle me-2"></i>Aucun fichier indexé.</div>';
+                return;
+            }
+            var html = '<table class="table table-sm mb-0"><thead><tr><th>Fichier</th><th>Type</th><th>Taille</th><th>Indexé le</th></tr></thead><tbody>';
+            data.documents.forEach(function(doc) {
+                var icon = '<i class="fas fa-file-alt me-2"></i>';
+                if (doc.extension === 'pdf') icon = '<i class="fas fa-file-pdf me-2 text-danger"></i>';
+                else if (doc.extension === 'docx' || doc.extension === 'doc') icon = '<i class="fas fa-file-word me-2 text-primary"></i>';
+                html += '<tr><td>' + icon + escapeHtml(doc.filename || 'N/A') + '</td><td><span class="badge bg-secondary">' + ((doc.extension || '?').toUpperCase()) + '</span></td><td>' + formatBytes(doc.size) + '</td><td><small>' + formatDate(doc.indexed_at) + '</small></td></tr>';
+            });
+            html += '</tbody></table><div class="text-muted small mt-2">' + data.documents.length + ' document(s) indexé(s)</div>';
+            indexedDocsBody.innerHTML = html;
+        }
+
         function loadIndexedDocs() {
             if (indexedDocsLoaded) return;
             indexedDocsLoaded = true;
             fetch('{{ path("app_market_indexed_docs", {id: market.id}) }}')
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    renderIndexedDocs(data);
-                })
-                .catch(function() {
-                    if (indexedDocsBody) {
-                        indexedDocsBody.innerHTML = '<div class="alert alert-danger mb-0"><i class="fas fa-times-circle me-2"></i>Erreur lors du chargement.</div>';
-                    }
-                });
+            .then(function(r) { return r.json(); })
+            .then(function(data) { renderIndexedDocs(data); })
+            .catch(function() {
+                if (indexedDocsBody) indexedDocsBody.innerHTML = '<div class="alert alert-danger mb-0">Erreur lors du chargement.</div>';
+            });
         }
 
         if (indexedDocsTab) {
-            indexedDocsTab.addEventListener('click', function() {
-                loadIndexedDocs();
-            });
+            indexedDocsTab.addEventListener('click', function() { loadIndexedDocs(); });
         }
     });
+})();
 </script>
 {% endblock %}

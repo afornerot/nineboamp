@@ -1,8 +1,8 @@
 # IA / LLM
 
-Un service de base (`App\Service\AiService`) est inclus pour interroger un LLM.
-Tout provider expose un endpoint `/chat/completions` compatible OpenAI
-(Gemini, Mistral, OpenAI, Ollama, Groq, etc.).
+L'application utilise un **agent Python** qui orchestre les appels LLM via **function calling** OpenAI.
+
+> **Note** : L'agent est une implémentation "maison" utilisant httpx pour les appels directs à l'API OpenAI. Ce n'est **pas** LlamaIndex.
 
 ## Configuration
 
@@ -15,7 +15,42 @@ Variables à configurer dans `.env.local` :
 | `AI_API_KEY` | Clé API | `changeme` |
 | `AI_BASE_URL` | URL de base (doit exposer `/chat/completions`) | `https://api.groq.com/openai/v1` |
 
-## Utilisation
+**Note** : Le fichier `.env.local` peut contenir plusieurs configurations (xolo, groq...) — la dernière déclaration de chaque variable prime.
+
+## Agent IA (Chat conversationnel)
+
+L'agent IA tourne dans le container Docker sur le port interne **8000** et utilise le mechanism de **function calling** d'OpenAI pour accéder à des outils :
+
+### Outils disponibles
+
+| Outil | Description |
+|-------|-------------|
+| `amoxtli_search` | Recherche dans les documents indexés d'un marché via amoxtli |
+| `list_documents` | Liste les documents disponibles pour un marché |
+
+### Architecture
+
+```
+[Utilisateur] → [MarketChatController] → [AgentService] → [Agent Python :8000]
+                                                            │
+                                                            ├── Lit le system prompt depuis src/DataFixtures/data/scoring/chat.context.md
+                                                            │
+                                                            ├── Utilise les outils amoxtli_search / list_documents
+                                                            │
+                                                            └── Appelle l'API LLM (OpenAI function calling)
+```
+
+### Sessions persistantes
+
+Les sessions de chat sont sauvegardées dans `/app/llama` (monté sur `./volume/llama` en local). Chaque marché a son propre fichier de session JSON.
+
+### Endpoint
+
+- `POST /user/market/{id}/chat` — Envoie un message et reçoit une réponse de l'agent
+- `GET /user/market/{id}/chat/history` — Récupère l'historique des messages
+- `DELETE /user/market/{id}/chat/{messageId}` — Supprime un message
+
+## AiService (Appels directs)
 
 Dans un controller ou un service :
 
@@ -42,13 +77,24 @@ $messages = [
 $response = $this->ai->askMessages($messages, 0.7, 2048);
 ```
 
-## Endpoints personnalisés
+## Prompts en fichiers .md
 
-Le service expose aussi une méthode générique pour appeler n'importe quel
-endpoint du provider (`/embeddings`, `/responses`, `/images/generations...`) :
+Les prompts sont stockés dans `src/DataFixtures/data/scoring/*.md` (plus de BDD).
 
-```php
-$data = $this->ai->request('/embeddings', ['input' => 'Hello world']);
+| Fichier | Rôle |
+|---------|------|
+| `chat.context.md` | System prompt pour le chat agenté (avec placeholders `{{metadata}}`, `{{description}}`, etc.) |
+| `scoring.role.md` | Rôle LLM pour le scoring (contexte entreprise + chapitre "ce que nous ne faisons pas") |
+| `scoring.user.md` | Prompt de scoring marché par marché (JSON strict) |
+
+Les prompts supportent un frontmatter YAML minimal :
+
+```yaml
+---
+purpose: Scoring des marchés
+temperature: 0.3
+max_tokens: 500
+---
 ```
 
 ## Limites et quotas
@@ -59,37 +105,15 @@ Le service applique automatiquement :
   header `Retry-After` ou du message d'erreur.
 - **Timeout 60s** sur le client HTTP Symfony.
 - Tronquage du contenu via `array_map()` côté scoring pour respecter la fenêtre
-  de tokens du provider (Groq free tier = 8000 TPM par défaut).
+  de tokens du provider.
 
 Si un appel LLM échoue après les retries, `AiService::ask()` retourne `''` et
 un log d'erreur est émis (`var/log/dev.log` → `app.ERROR: AiService: ...`).
 
-## Prompts éditables en BDD
+## Dépannage
 
-Les prompts utilisés par le scoring et le chat sont stockés en BDD dans la
-table `scoring_prompt`. Ils sont éditables via l'interface admin
-(`/admin/scoring-prompt/{slug}`).
-
-Prompts disponibles :
-
-| Source file | Rôle |
-|-------------|------|
-| `extract.system` | Prompt système pour l'extraction de mots-clés depuis les fiches produits |
-| `extract.user` | Prompt utilisateur pour l'extraction |
-| `scoring.role` | Rôle LLM pour le scoring (contexte entreprise + chapitre "ce que nous ne faisons pas") |
-| `scoring.user` | Prompt de scoring marché par marché (JSON strict) |
-| `chat.context` | Système prompt pour le chat IA par marché (RAG sur docs amoxtli) |
-
-Les fichiers `.md` sources sont dans `src/DataFixtures/data/scoring/`. Au
-boot, `PromptLoader` lit le fichier et insère/mets à jour la ligne BDD.
-Les prompts supportent un frontmatter YAML minimal : `purpose`, `variant`,
-`temperature`, `max_tokens`.
-
-## Endpoints personnalisés
-
-Le service expose aussi une méthode générique pour appeler n'importe quel
-endpoint du provider (`/embeddings`, `/responses`, `/images/generations`...) :
-
-```php
-$data = $this->ai->request('/embeddings', ['input' => 'Hello world']);
-```
+| Symptôme | Cause probable | Action |
+|---|---|---|
+| "Erreur de connexion" dans le chat | Agent Python non démarré ou timeout | Vérifier que le container est UP et que l'agent écoute sur `:8000` |
+| LLM répond avec les placeholders `{{...}}` non remplacés | Prompts non à jour | L'agent charge les prompts au démarrage ; redémarrer le container |
+| Rate limit dépassé | Trop de requêtes simultanées | Patienter ou ajuster `AI_MODEL` / `AI_BASE_URL` |

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>DEBUG - Chat Multi-Phases [Market {{ market.id }}]</title>
+    <style>
+        body { font-family: monospace; font-size: 12px; background: #1a1a1a; color: #e0e0e0; padding: 20px; }
+        .warning { background: #ffcc00; color: #000; padding: 10px; margin-bottom: 20px; font-weight: bold; text-align: center; }
+        .section { background: #2a2a2a; border: 1px solid #444; margin: 15px 0; padding: 15px; }
+        .section h2 { margin-top: 0; color: #4CAF50; border-bottom: 1px solid #444; padding-bottom: 5px; }
+        .section h3 { color: #888; margin-top: 15px; }
+        pre { background: #1a1a1a; padding: 10px; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; max-height: 400px; overflow-y: auto; }
+        .doc-item { background: #333; margin: 10px 0; padding: 10px; border-left: 3px solid #4CAF50; }
+        .back-btn { background: #4CAF50; color: #fff; padding: 10px 20px; text-decoration: none; display: inline-block; margin-bottom: 20px; }
+        .phase { border-left: 4px solid; padding-left: 15px; margin: 15px 0; }
+        .phase-1 { border-color: #FF5722; }
+        .phase-2 { border-color: #2196F3; }
+        .phase-3 { border-color: #4CAF50; }
+        .phase-title { font-size: 14px; font-weight: bold; margin-bottom: 10px; }
+        .phase-1 .phase-title { color: #FF5722; }
+        .phase-2 .phase-title { color: #2196F3; }
+        .phase-3 .phase-title { color: #4CAF50; }
+        .query-list { background: #333; padding: 10px; margin: 5px 0; }
+    </style>
+</head>
+<body>
+    <div class="warning">
+        🚧 DEBUG MODE - À supprimer après utilisation 🚧
+    </div>
+
+    <a href="{{ path('app_market_show', {id: market.id}) }}" class="back-btn">← Retour au marché</a>
+
+    <h1>Chat Debug - Marché #{{ market.id }}</h1>
+    <h2>Multi-Phases RAG</h2>
+
+    <div class="section">
+        <h2>Question Utilisateur</h2>
+        {% if lastUserMessage %}
+            <pre>{{ lastUserMessage }}</pre>
+        {% else %}
+            <em>Aucune question posée</em>
+        {% endif %}
+    </div>
+
+    {% if debugData %}
+        {% if debugData.phase1 %}
+        <div class="section">
+            <h2>Phase 1: Planification RAG</h2>
+            <div class="phase phase-1">
+                <div class="phase-title">🔍 Phase 1: LLM définit les queries de recherche</div>
+                
+                <h3>Question posée au LLM</h3>
+                <pre>{{ debugData.phase1.question }}</pre>
+                
+                <h3>Réponse brute du LLM</h3>
+                <pre>{{ debugData.phase1.llmRawResponse ?? '(non disponible)' }}</pre>
+                
+                <h3>Queries planifiées par le LLM</h3>
+                {% if debugData.phase1.plannedQueries|length > 0 %}
+                    <div class="query-list">
+                    {% for query in debugData.phase1.plannedQueries %}
+                        <div>{{ loop.index }}. "{{ query }}"</div>
+                    {% endfor %}
+                    </div>
+                {% else %}
+                    <em>Aucune query planifiée (le LLM a jugé qu'aucune recherche n'était nécessaire)</em>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if debugData.phase2 %}
+        <div class="section">
+            <h2>Phase 2: Recherche RAG (amoxtli)</h2>
+            <div class="phase phase-2">
+                <div class="phase-title">📂 Phase 2: Recherche dans les documents</div>
+                
+                <h3>Queries exécutées</h3>
+                {% if debugData.phase2.queriesExecuted|length > 0 %}
+                    <div class="query-list">
+                    {% for query in debugData.phase2.queriesExecuted %}
+                        <div>{{ loop.index }}. "{{ query }}"</div>
+                    {% endfor %}
+                    </div>
+                {% else %}
+                    <em>Aucune query exécutée</em>
+                {% endif %}
+                
+                <h3>Résultats: {{ debugData.phase2.contextCount }} sections trouvées</h3>
+                {% if debugData.phase2.sources|length > 0 %}
+                    <p><strong>Sources:</strong> {{ debugData.phase2.sources|join(', ') }}</p>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if debugData.phase3 %}
+        <div class="section">
+            <h2>Phase 3: Réponse LLM</h2>
+            <div class="phase phase-3">
+                <div class="phase-title">💬 Phase 3: Réponse finale fondée sur les documents</div>
+                
+                <h3>Prompt Système envoyé au LLM</h3>
+                <pre>{{ debugData.phase3.systemPrompt }}</pre>
+            </div>
+        </div>
+        {% endif %}
+    {% else %}
+        <div class="section">
+            <p><em>Pas de données de debug disponibles. Posez une question dans le chat d'abord.</em></p>
+        </div>
+    {% endif %}
+
+    <div class="warning">
+        🚧 DEBUG MODE - À supprimer après utilisation 🚧
+    </div>
+</body>
+</html>

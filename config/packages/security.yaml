@@ -22,7 +22,7 @@ security:
       security: false
 
     mcp:
-      pattern: ^/mcp
+      pattern: ^/(mcp|api)
       security: true
       stateless: true
       provider: mcp_provider

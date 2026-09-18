@@ -11,11 +11,21 @@ RUN tar -xzf /tmp/amoxtli.tar.gz -C /tmp \
  && chmod +x /usr/local/bin/amoxtli \
  && rm -rf /tmp/amoxtli.tar.gz /tmp/LICENSE /tmp/README.md /tmp/docs
 
-RUN apk add --no-cache poppler-utils pandoc
-
-USER apache
 WORKDIR /app
 COPY --chown=apache:apache . .
+
+# Python base dependencies
+USER root
+RUN apk add --no-cache poppler-utils pandoc python3 py3-pip build-base && pip3 install --no-cache-dir --break-system-packages openpyxl
+USER apache
+
+# Copy agent files
+COPY --chown=apache:apache agent/requirements.txt /app/agent/requirements.txt
+
+# LlamaIndex agent dependencies
+USER root
+RUN pip3 install --no-cache-dir --break-system-packages -r /app/agent/requirements.txt
+USER apache
 
 RUN composer install --no-interaction --no-scripts
 RUN php bin/console assets:install public

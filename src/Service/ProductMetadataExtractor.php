@@ -107,13 +107,7 @@ class ProductMetadataExtractor
             return $fromFile;
         }
 
-        return "Tu es un assistant qui produit UNIQUEMENT du JSON valide, sans aucun texte autour.\n"
-            ."Règles strictes :\n"
-            ."- Aucune explication avant ou après le JSON.\n"
-            ."- Pas de bloc de code markdown.\n"
-            ."- Pas de commentaire.\n"
-            ."- Réponds uniquement par {...} brut.\n"
-            ."- Si tu ne peux pas, réponds exactement : {}";
+        throw new \RuntimeException('Prompt extract.system.md not found in src/DataFixtures/data/scoring/');
     }
 
     private function buildPrompt(string $fiche, bool $needKeywords, bool $needSectors, bool $needDescription): string

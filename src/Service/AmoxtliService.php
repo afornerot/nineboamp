@@ -33,6 +33,11 @@ class AmoxtliService
         return $this->binaryPath;
     }
 
+    public function getProjectDir(): string
+    {
+        return $this->projectDir;
+    }
+
     public function initWorkspace(string $id): void
     {
         if (!$this->isAvailable()) {
@@ -81,6 +86,7 @@ class AmoxtliService
         }
 
         $this->convertPdfsToText($marketPath);
+        $this->convertExcelToText($marketPath);
 
         $process = new Process([
             $this->binaryPath,
@@ -175,6 +181,34 @@ class AmoxtliService
             $process = new Process(['pdftotext', '-layout', $pdfFile, $txtFile]);
             $process->setTimeout(30);
             $process->run();
+        }
+    }
+
+    private function convertExcelToText(string $directory): void
+    {
+        $xlsxFiles = glob($directory.'/*.xlsx');
+
+        foreach ($xlsxFiles as $xlsxFile) {
+            $txtFile = preg_replace('/\.xlsx$/i', '.txt', $xlsxFile);
+
+            if (is_file($txtFile)) {
+                continue;
+            }
+
+            $process = new Process([
+                'python3', '-c',
+                'import openpyxl, csv, sys; wb = openpyxl.load_workbook(sys.argv[1]); ws = wb.active; w = csv.writer(sys.stdout, quoting=csv.QUOTE_ALL, lineterminator="\n"); [w.writerow(row) for row in ws.values]',
+                $xlsxFile,
+            ]);
+            $process->setTimeout(30);
+
+            try {
+                $process->run();
+                if ($process->isSuccessful()) {
+                    file_put_contents($txtFile, $process->getOutput());
+                }
+            } catch (\Throwable) {
+            }
         }
     }
 

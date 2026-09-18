@@ -32,6 +32,5 @@ services:
       - ./misc:/app/misc:delegated
       - ./public/lib:/app/public/lib:delegated
       - ./var:/app/var
-      - ./volume/llama:/app/llama
       - ./.env.local:/app/.env.local
       - ./.env:/app/.env

@@ -23,10 +23,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-SESSIONS_DIR = "/app/llama"
-JOBS_DIR = "/app/llama/jobs"
+JOBS_DIR = "/tmp/jobs"
 
-os.makedirs(SESSIONS_DIR, exist_ok=True)
 os.makedirs(JOBS_DIR, exist_ok=True)
 
 for env_file in [Path("/app/.env.local"), Path("/app/.env")]:
@@ -565,7 +563,7 @@ async def chat(request: ChatRequest):
         "reset_session": request.reset_session
     }
     
-    log_file = f"/app/llama/jobs/{job_id}.log"
+    log_file = f"/tmp/jobs/{job_id}.log"
     
     with open(log_file, "w") as f:
         f.write(f"Starting chat job {job_id}\n")
@@ -613,7 +611,7 @@ async def score_market(request: ScoreRequest):
         "products": request.products
     }
     
-    log_file = f"/app/llama/jobs/{job_id}.log"
+    log_file = f"/tmp/jobs/{job_id}.log"
     
     with open(log_file, "w") as f:
         f.write(f"Starting score job {job_id}\n")

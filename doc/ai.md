@@ -40,9 +40,11 @@ L'agent IA tourne dans le container Docker sur le port interne **8000** et utili
                                                             └── Appelle l'API LLM (OpenAI function calling)
 ```
 
-### Sessions persistantes
+### Stockage
 
-Les sessions de chat sont sauvegardées dans `/app/llama` (monté sur `./volume/llama` en local). Chaque marché a son propre fichier de session JSON.
+**Historique des conversations** : En base de données (`market_chat_message`), récupéré à chaque requête pour reconstruire le contexte.
+
+**Fichiers temporaires** : `/tmp/jobs/` (fichiers `.json` et `.log` des jobs, nettoyés automatiquement après expiration).
 
 ### Endpoint
 

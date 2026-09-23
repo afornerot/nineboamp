@@ -94,4 +94,32 @@ class ScoringAgentService
             return false;
         }
     }
+
+    /**
+     * Wait synchronously for scoring result.
+     *
+     * @return array|null Result data or null on failure/timeout
+     */
+    public function waitForResult(string $jobId, int $maxRetries = 30, int $delaySeconds = 2): ?array
+    {
+        for ($i = 0; $i < $maxRetries; ++$i) {
+            $result = $this->getScoringResult($jobId);
+
+            if ('not_found' === $result['status']) {
+                $this->logger->warning('ScoringAgentService: job not found', ['job_id' => $jobId]);
+
+                return null;
+            }
+
+            if ('done' === $result['status']) {
+                return $result['result'] ?? null;
+            }
+
+            sleep($delaySeconds);
+        }
+
+        $this->logger->warning('ScoringAgentService: timeout waiting for result', ['job_id' => $jobId, 'max_retries' => $maxRetries]);
+
+        return null;
+    }
 }

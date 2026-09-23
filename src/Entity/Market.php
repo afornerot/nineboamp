@@ -115,8 +115,11 @@ class Market
 
     public function __construct()
     {
+        $parisTz = new \DateTimeZone('Europe/Paris');
         $this->createdAt = new \DateTime();
+        $this->createdAt->setTimezone($parisTz);
         $this->updatedAt = new \DateTime();
+        $this->updatedAt->setTimezone($parisTz);
         $this->marketProducts = new ArrayCollection();
     }
 
@@ -276,6 +279,7 @@ class Market
     {
         $this->status = $status;
         $this->updatedAt = new \DateTime();
+        $this->updatedAt->setTimezone(new \DateTimeZone('Europe/Paris'));
 
         return $this;
     }

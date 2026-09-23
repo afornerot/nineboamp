@@ -76,14 +76,28 @@ class BoampFinderServiceTest extends TestCase
         $method = $reflection->getMethod('scoreAndQualify');
         $method->setAccessible(true);
 
-        $reflectionAi = new \ReflectionClass($service);
-        $aiProp = $reflectionAi->getProperty('ai');
-        $aiProp->setAccessible(true);
-        $mockAi = $this->createMock(AiService::class);
-        $mockAi->method('ask')->willReturn('{"score": 75, "priority": "B", "products": [{"name": "Planigram", "score": 75, "relevance": "Bonne correspondance"}]}');
-        $aiProp->setValue($service, $mockAi);
+        $market = (new Market())->setIdweb('26-12345')->setTitle('Audit des systèmes d\'information');
 
-        $result = $method->invoke($service, (new Market())->setIdweb('26-12345')->setTitle('Audit des systèmes d\'information'), $details, [$product]);
+        $reflectionProp = new \ReflectionClass($service);
+        $emProp = $reflectionProp->getProperty('em');
+        $emProp->setAccessible(true);
+        $mockEm = $this->createMock(EntityManagerInterface::class);
+        $mockEm->method('flush')->willReturn(null);
+        $emProp->setValue($service, $mockEm);
+
+        $reflectionProp = new \ReflectionClass($service);
+        $scoringProp = $reflectionProp->getProperty('scoringAgent');
+        $scoringProp->setAccessible(true);
+        $mockScoring = $this->createMock(\App\Service\ScoringAgentService::class);
+        $mockScoring->method('startScoringJob')->willReturn('test-job-id');
+        $mockScoring->method('waitForResult')->willReturn([
+            'score' => 75,
+            'priority' => 'B',
+            'products' => [['name' => 'Planigram', 'score' => 75, 'relevance' => 'Bonne correspondance']],
+        ]);
+        $scoringProp->setValue($service, $mockScoring);
+
+        $result = $method->invoke($service, $market, $details, [$product]);
 
         $this->assertNotNull($result);
         $this->assertArrayHasKey(0, $result);
@@ -94,7 +108,7 @@ class BoampFinderServiceTest extends TestCase
     {
         return new BoampFinderService(
             $this->createMock(BoampApiService::class),
-            $this->createMock(AiService::class),
+            $this->createMock(\App\Service\ScoringAgentService::class),
             $this->createMock(\App\Service\RocketChatNotifier::class),
             $this->createMock(\App\Repository\ProductRepository::class),
             $this->createMock(\App\Repository\MarketRepository::class),

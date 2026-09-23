@@ -43,9 +43,9 @@
                 <th>Titre</th>
                 <th>Acheteur</th>
                 <th>Statut</th>
-                <th>Montant</th>
                 <th>Produits</th>
                 <th>Deadline</th>
+                <th>Détection</th>
             </tr>
         </thead>
         <tbody>
@@ -61,14 +61,14 @@
                 <td>{{ market.title|length > 60 ? market.title|slice(0, 60) ~ '…' : market.title }}</td>
                 <td>{{ market.buyer|length > 30 ? market.buyer|slice(0, 30) ~ '…' : market.buyer }}</td>
                 <td><span class="badge bg-info">{{ market.statuslabel }}</span></td>
-                <td>{{ market.amount ?: '?' }}</td>
                 <td>
                     {% set sorted = market.marketProducts|sort((a, b) => b.score <=> a.score) %}
                     {% for mp in sorted|slice(0, 3) %}
                         {{ mp.product.name }} ({{ mp.score ?? '?' }}){% if not loop.last %} · {% endif %}
                     {% endfor %}
                 </td>
-                <td>{{ market.deadline ? market.deadline|date('d/m/Y') : '?' }}</td>
+                <td data-order="{{ market.deadline ? market.deadline|date('Y-m-d') : '9999' }}">{{ market.deadline ? market.deadline|date('d/m/Y') : '?' }}</td>
+                <td data-order="{{ market.createdAt ? market.createdAt|date('Y-m-d') : '' }}">{{ market.createdAt ? market.createdAt|date('d/m/Y') : '-' }}</td>
             </tr>
             {% endfor %}
         </tbody>

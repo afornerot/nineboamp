@@ -24,7 +24,7 @@
         <tbody>
             {% for report in reports %}
             <tr class="{{ report.error ? 'table-danger' : '' }}">
-                <td>{{ report.executedAt|date('d/m/Y H:i') }}</td>
+                <td data-order="{{ report.executedAt|date('Y-m-d H:i') }}">{{ report.executedAt|date('d/m/Y H:i') }}</td>
                 <td>{{ report.marketsFound ?: 0 }}</td>
                 <td>{{ report.marketsQualified ?: 0 }}</td>
                 <td>{{ report.marketsNotified ?: 0 }}</td>
@@ -32,7 +32,7 @@
                 <td>{% if report.error %}<span class="text-danger small">{{ report.error }}</span>{% else %}<i class="fas fa-check text-success"></i>{% endif %}</td>
             </tr>
             {% else %}
-            <tr>
+            <tr class="empty-row">
                 <td colspan="6" class="text-center text-muted">Aucun rapport.</td>
             </tr>
             {% endfor %}

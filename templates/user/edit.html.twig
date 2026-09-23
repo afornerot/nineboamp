@@ -38,16 +38,17 @@
             </div>
 
             {%if form.roles is defined%}
-                <div class="col-md-6">
-                    <div class="card mt-3">
-                        <div class="card-header">Permissions</div>
-                        <div class="card-body">
+            <div class="col-md-6">
+                <div class="card mt-3">
+                    <div class="card-header">Permissions</div>
+                    <div class="card-body">
                             {{ form_row(form.roles) }}
                             {{ form_row(form.groupes) }}
-                        </div>
                     </div>
                 </div>
-            {%endif%}        
+            </div>
+            {%endif%}
+
         </div>
     {{ form_end(form) }}
     </div>

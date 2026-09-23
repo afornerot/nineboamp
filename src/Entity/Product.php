@@ -36,6 +36,7 @@ class Product
     public function __construct()
     {
         $this->createdAt = new \DateTime();
+        $this->createdAt->setTimezone(new \DateTimeZone('Europe/Paris'));
     }
 
     public function getId(): ?int

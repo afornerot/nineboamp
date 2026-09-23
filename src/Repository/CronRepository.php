@@ -24,12 +24,13 @@ class CronRepository extends ServiceEntityRepository
     public function toExec(): array
     {
         $now = new \DateTime();
+        $now->setTimezone(new \DateTimeZone('Europe/Paris'));
 
         return $this->createQueryBuilder('cron')
             ->where('cron.statut = :todo')
-            ->orWhere('cron.statut = :ok AND cron.nextexecdate < :now AND cron.repeatcall = 0')
-            ->orWhere('cron.statut = :ko AND cron.nextexecdate < :now AND cron.repeatcall = 0')
-            ->orWhere('cron.statut = :ko AND cron.nextexecdate < :now AND cron.repeatcall > cron.repeatexec')
+            ->orWhere('cron.statut = :ok AND cron.nextexecdate < :now AND (cron.repeatcall = 0 OR cron.repeatcall IS NULL)')
+            ->orWhere('cron.statut = :ko AND cron.nextexecdate < :now AND (cron.repeatcall = 0 OR cron.repeatcall IS NULL)')
+            ->orWhere('cron.statut = :ko AND cron.nextexecdate < :now AND (cron.repeatcall IS NOT NULL AND cron.repeatcall > cron.repeatexec)')
             ->setParameter('todo', Cron::STATUT_TODO)
             ->setParameter('ok', Cron::STATUT_OK)
             ->setParameter('ko', Cron::STATUT_KO)

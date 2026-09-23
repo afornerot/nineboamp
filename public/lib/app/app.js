@@ -55,6 +55,8 @@ $(document).ready(function () {
 
 	if (!$table.length || typeof $.fn.DataTable === 'undefined') return;
 
+	if ($table.find('tbody tr:not(.empty-row)').length === 0) return;
+
 	$orderCol = $table.data('order-col') ?? 0;
 	$orderDir = $table.data('order-dir') ?? 'asc';
 

@@ -22,7 +22,7 @@ class BoampFinderService
 
     public function __construct(
         private BoampApiService $boampApi,
-        private AiService $ai,
+        private ScoringAgentService $scoringAgent,
         private RocketChatNotifier $notifier,
         private ProductRepository $productRepository,
         private MarketRepository $marketRepository,
@@ -125,9 +125,9 @@ class BoampFinderService
                     continue;
                 }
 
-                $existing = $this->marketRepository->find($idweb);
+                $existing = $this->marketRepository->findOneBy(['idweb' => $idweb]);
                 if ($existing) {
-                    if (null !== $existing->getScore()) {
+                    if (null !== $existing->getScore() && Market::STATUS_DETECTED !== $existing->getStatus()) {
                         ++$skippedExisting;
                         $progress?->setMessage(sprintf('%s — déjà scoré, skip', $idweb));
                         $progress?->advance();
@@ -214,6 +214,52 @@ class BoampFinderService
             $progress?->finish();
             $io?->newLine();
             $io?->writeln(sprintf('  → %d marché(s) qualifié(s), %d ignoré(s).', $processed, $marketsFound - $processed));
+
+            $io?->section('4b/5 — Scoring des marchés détectés en base');
+            $detectedMarkets = $this->marketRepository->findBy(['status' => Market::STATUS_DETECTED]);
+            $io?->writeln(sprintf('  → %d marché(x) en statut "détecté" à rescorer…', count($detectedMarkets)));
+
+            foreach ($detectedMarkets as $detectedMarket) {
+                $idweb = $detectedMarket->getIdweb();
+                $rawData = $detectedMarket->getRawData();
+                if (null === $rawData) {
+                    continue;
+                }
+
+                try {
+                    $details = json_decode($rawData, true);
+                    if (!is_array($details)) {
+                        continue;
+                    }
+                    $details = array_merge($details, ['objet' => $detectedMarket->getTitle()]);
+                } catch (\Throwable) {
+                    continue;
+                }
+
+                try {
+                    $scored = $this->scoreAndQualify($detectedMarket, $details, $products);
+                } catch (\Throwable $e) {
+                    $this->logger->warning('BoampFinderService: scoring failed pour marché détecté', [
+                        'idweb' => $idweb,
+                        'error' => $e->getMessage(),
+                    ]);
+                    continue;
+                }
+
+                if (null === $scored) {
+                    continue;
+                }
+
+                [$market, $marketProducts] = $scored;
+                $this->em->persist($market);
+                foreach ($marketProducts as $mp) {
+                    $this->em->persist($mp);
+                }
+                $this->em->flush();
+
+                ++$marketsQualified;
+                $io?->writeln(sprintf('  → <info>%s</info> rescored %d/100 (priorité %s)', $idweb, $market->getScore() ?? 0, $market->getPriority() ?? '?'));
+            }
 
             $io?->section('5/5 — Persistance du rapport');
             $report->setMarketsFound($marketsFound);
@@ -319,39 +365,56 @@ class BoampFinderService
         $amount = $this->formatAmount($details);
         $url = $market->getUrl() ?? "https://www.boamp.fr/pages/avis/?q=idweb:{$market->getIdweb()}";
 
-        $prompt = $this->buildScoringPrompt($products, $market->getIdweb(), $title, $buyer, $description, $amount, $deadlineRaw, $details);
+        $productsData = [];
+        foreach ($products as $p) {
+            $productsData[] = [
+                'name' => $p->getName() ?? '',
+                'description' => $p->getDescription() ?? '',
+                'keywords' => $p->getKeywords() ?? '',
+                'sectors' => $p->getSectors() ?? '',
+            ];
+        }
 
-        $role = $this->getScoringRole();
-        $userPrompt = $this->promptLoader->load('scoring.user');
-        $temperature = $userPrompt?->getTemperature() ?? 0.2;
-        $maxTokens = $userPrompt?->getMaxTokens() ?? 4096;
-        $response = $this->ai->ask($prompt, $role, $temperature, $maxTokens);
+        $this->em->flush();
+        $marketId = $market->getId();
 
-        if ('' === $response) {
+        $jobId = $this->scoringAgent->startScoringJob(
+            $marketId,
+            $title ?? '',
+            $buyer,
+            $description,
+            $amount,
+            $deadlineRaw,
+            $productsData
+        );
+
+        if (null === $jobId) {
+            $this->logger->warning('BoampFinderService: failed to start scoring job', ['idweb' => $market->getIdweb()]);
+
             return null;
         }
 
-        $parsed = $this->parseScoringResponse($response);
+        $result = $this->scoringAgent->waitForResult($jobId);
 
-        if (null === $parsed || !isset($parsed['score'], $parsed['priority'], $parsed['products'])) {
+        if (null === $result) {
+            $this->logger->warning('BoampFinderService: scoring job timeout or error', ['idweb' => $market->getIdweb(), 'job_id' => $jobId]);
+
             return null;
         }
-
-        $this->recalculateGlobalScore($parsed);
 
         $market->setDescription($description);
         $market->setDeadline($deadlineRaw ? new \DateTime($deadlineRaw) : null);
         $market->setAmount($amount);
-        $market->setScore($parsed['score']);
-        $market->setPriority($parsed['priority']);
-        $market->setExplanation($parsed['explanation'] ?? null);
+        $market->setScore($result['score'] ?? 0);
+        $market->setPriority($result['priority'] ?? 'C');
+        $market->setExplanation($result['explanation'] ?? null);
         $market->setStatus(Market::STATUS_QUALIFIED);
 
         $marketProducts = [];
-        foreach ($parsed['products'] as $p) {
+        foreach ($result['products'] ?? [] as $p) {
             $mp = new MarketProduct();
             $mp->setMarket($market);
-            $productEntity = $this->findProductByName($products, $p['name']);
+            $productEntity = $this->findProductByName($products, $p['name'] ?? '');
             if ($productEntity) {
                 $mp->setProduct($productEntity);
             }

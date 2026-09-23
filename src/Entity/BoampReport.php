@@ -33,6 +33,7 @@ class BoampReport
     public function __construct()
     {
         $this->executedAt = new \DateTime();
+        $this->executedAt->setTimezone(new \DateTimeZone('Europe/Paris'));
     }
 
     public function getId(): ?int

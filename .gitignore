@@ -20,3 +20,8 @@ phpstan.neon
 /phpunit.xml
 /.phpunit.cache/
 ###< phpunit/phpunit ###
+
+###> python ###
+__pycache__/
+*.py[cod]
+###< python ###

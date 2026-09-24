@@ -1,0 +1,56 @@
+<html>
+  <head>
+    <title>{{ .Meta.title }}</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.0/github-markdown-light.min.css"
+    />
+    <style type="text/css">
+      @font-face {
+        font-family: 'Hack Bold';
+        src: url('{{ resolve .Context "../resources/fonts/Hack-Bold.ttf" }}') format("truetype");
+        font-weight: bold;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: 'Hack Regular';
+        src: url('{{ resolve .Context "../resources/fonts/Hack-Regular.ttf" }}') format("truetype");
+        font-weight: normal;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: 'Space Mono Regular';
+        src: url('{{ resolve .Context "../resources/fonts/SpaceMono-Regular.ttf" }}') format("truetype");
+        font-weight: normal;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: 'Open Sans Regular';
+        src: url('{{ resolve .Context "../resources/fonts/OpenSans-Regular.ttf" }}') format("truetype");
+        font-weight: normal;
+        font-style: normal;
+      }
+    </style>
+    <link href="{{ resolve .Context "./vars.css" "text/css" }}" rel="stylesheet" />
+    <link href="{{ resolve .Context "./style.css" "text/css" }}" rel="stylesheet" />
+    <link href="{{ resolve .Context "./print.css" "text/css" }}" rel="stylesheet" />
+    <style>
+      .markdown-body h1:first-of-type::after {
+        content: "{{ default "" .Meta.subtitle }}";
+      }
+    </style>
+  </head>
+  <body class="markdown-body">
+    <img id="logo" src={{ resolve .Context "../resources/img/logo.svg" "image/svg+xml" }} />
+    <div id="gears">
+      <img class="gear g1" src={{ resolve .Context "../resources/img/Gears-02.svg" "image/svg+xml" }} />
+      <img class="gear g2" src={{ resolve .Context "../resources/img/Gears-03.svg" "image/svg+xml" }} />
+      <img class="gear g3" src={{ resolve .Context "../resources/img/Gears-04.svg" "image/svg+xml" }} />
+      <img class="gear g4" src={{ resolve .Context "../resources/img/Gears-05.svg" "image/svg+xml" }} />
+      <img class="gear g5" src={{ resolve .Context "../resources/img/Gears-06.svg" "image/svg+xml" }} />
+    </div>
+    {{ .Body }}
+  </body>
+</html>

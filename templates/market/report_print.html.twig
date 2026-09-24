@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Rapport de positionnement — {{ market.title ?: 'Marché #' ~ market.id }}</title>
+    <style>{% include 'market/print.css.twig' %}</style>
+</head>
+<body>
+
+<div class="cover-page">
+    <div class="cover-eyebrow">Rapport de positionnement commercial</div>
+
+    <div class="cover-market">{{ market.title ?: 'Marché #' ~ market.id }}</div>
+
+    <div class="cover-kpi-row">
+        <div class="cover-kpi">
+            <div class="cover-kpi-label">Marché</div>
+            <div class="cover-kpi-value">#{{ market.id }}</div>
+        </div>
+        <div class="cover-kpi">
+            <div class="cover-kpi-label">Acheteur</div>
+            <div class="cover-kpi-value">{{ market.buyer ?: 'N/A' }}</div>
+        </div>
+        <div class="cover-kpi">
+            <div class="cover-kpi-label">Dépôt</div>
+            <div class="cover-kpi-value">{{ market.deadline ? market.deadline|date('d/m/Y') : 'N/A' }}</div>
+        </div>
+        <div class="cover-kpi">
+            <div class="cover-kpi-label">Score</div>
+            <div class="cover-kpi-value">
+                {{ market.score ?? 'N/A' }}/100
+                {% if market.priority %}
+                    <span class="badge badge-{{ market.priority|lower }}">{{ market.priority }}</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="cover-spacer"></div>
+
+    <div class="cover-footer-meta">
+        <strong>Positionnement Cadoles</strong> · Imprimé le {{ "now"|date("d/m/Y H:i") }}
+    </div>
+</div>
+
+{% if report and report.markdownContent %}
+<div class="report-content">
+    {{ report.markdownContent|gfm_to_html|replace({
+        '[GRAVITÉ: HAUTE]': '<span class="risk-high">[GRAVITÉ: HAUTE]</span>',
+        '[GRAVITÉ: MOYENNE]': '<span class="risk-medium">[GRAVITÉ: MOYENNE]</span>',
+        '[GRAVITÉ: FAIBLE]': '<span class="risk-low">[GRAVITÉ: FAIBLE]</span>',
+    })|raw }}
+</div>
+{% endif %}
+
+</body>
+</html>

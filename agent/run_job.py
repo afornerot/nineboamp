@@ -9,7 +9,7 @@ import asyncio
 
 sys.path.insert(0, '/app')
 
-from agent.main import process_score, process_chat, ScoreRequest, ChatRequest
+from agent.main import process_score, process_chat, process_report, ScoreRequest, ChatRequest, ReportRequest
 
 def main():
     if len(sys.argv) < 4:
@@ -30,6 +30,9 @@ def main():
         elif job_type == "chat":
             request = ChatRequest(**request_json)
             asyncio.run(process_chat(job_id, request.market_id, request.message, request.history))
+        elif job_type == "report":
+            request = ReportRequest(**request_json)
+            asyncio.run(process_report(job_id, request))
         else:
             print(f"Unknown job type: {job_type}", file=sys.stderr)
             sys.exit(1)

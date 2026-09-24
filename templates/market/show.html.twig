@@ -107,6 +107,12 @@
                     <i class="fas fa-database"></i>
                 </button>
             </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-reports" type="button" role="tab" id="tab-reports-btn">
+                    <i class="fas fa-file-alt"></i> Rapports
+                    {% if reportsTotal is defined and reportsTotal > 0 %}<span class="badge bg-primary ms-1">{{ reportsTotal }}</span>{% endif %}
+                </button>
+            </li>
         </ul>
 
         <div class="tab-content">
@@ -163,6 +169,24 @@
                     <div class="card-body" id="indexed-docs-body">
                         <div class="text-center text-muted py-3">
                             <i class="fas fa-spinner fa-spin"></i> Chargement...
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-pane fade" id="tab-reports" role="tabpanel">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span><i class="fas fa-file-alt me-2"></i>Rapports de positionnement</span>
+                        <button id="btn-generate-report-tab" class="btn btn-sm btn-primary" data-market-id="{{ market.id }}">
+                            <i class="fas fa-magic me-1"></i> Générer un nouveau rapport
+                        </button>
+                    </div>
+                    <div class="card-body p-0">
+                        <div id="reports-list-body">
+                            <div class="text-center text-muted py-3">
+                                <i class="fas fa-spinner fa-spin"></i> Chargement...
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -264,6 +288,22 @@
     }
     .chat-msg:hover .btn-delete-msg { opacity: 0.6; }
     .btn-delete-msg:hover { opacity: 1 !important; color: #dc3545; }
+    .btn-star {
+        float: right;
+        background: transparent;
+        border: none;
+        color: var(--bs-secondary-color);
+        font-size: 0.85rem;
+        padding: 0.1rem 0.4rem;
+        margin-right: 0.25rem;
+        cursor: pointer;
+        opacity: 0.4;
+        transition: opacity 0.15s ease-in;
+    }
+    .chat-msg:hover .btn-star { opacity: 0.7; }
+    .btn-star.is-important { opacity: 1; color: #ffc107; }
+    .btn-star.is-important:hover { opacity: 1; color: #e0a800; }
+    .btn-star:hover { opacity: 1; color: #ffc107; }
 </style>
 
 <script>
@@ -288,7 +328,14 @@
         return escapeHtml(text).replace(/\n/g, '<br>');
     }
 
-    function addMessage(role, content, sources, createdAt, messageId) {
+    function starIconHtml(important) {
+        var cls = important ? 'fa-solid' : 'fa-regular';
+        var activeClass = important ? ' is-important' : '';
+        return '<button type="button" class="btn-star' + activeClass + '" title="Marquer comme important">' +
+            '<i class="' + cls + ' fa-star"></i></button>';
+    }
+
+    function addMessage(role, content, sources, createdAt, messageId, important) {
         if (chatEmpty) {
             chatEmpty.remove();
             chatEmpty = null;
@@ -296,12 +343,15 @@
         var div = document.createElement('div');
         div.className = 'chat-msg chat-msg-' + role;
         div.dataset.messageId = messageId || '';
+        div.dataset.important = important === false ? '0' : '1';
 
+        var buttons = messageId ? starIconHtml(important !== false) : '';
         var deleteBtn = messageId
             ? '<button type="button" class="btn-delete-msg" title="Supprimer ce message"><i class="fas fa-times"></i></button>'
             : '';
+        if (deleteBtn) buttons += deleteBtn;
 
-        var html = '<div>' + deleteBtn + renderMarkdown(content) + '</div>';
+        var html = '<div>' + buttons + renderMarkdown(content) + '</div>';
         if (sources && sources.length > 0) {
             html += '<div class="chat-sources"><i class="fas fa-file-alt"></i> ' +
                 sources.map(escapeHtml).join(', ') + '</div>';
@@ -313,6 +363,42 @@
     }
 
     chatMessages.addEventListener('click', function(e) {
+        var starBtn = e.target.closest('.btn-star');
+        if (starBtn) {
+            var msgDiv = starBtn.closest('.chat-msg');
+            var messageId = msgDiv.dataset.messageId;
+            if (!messageId) return;
+
+            var toggleUrl = '{{ path("app_market_chat_toggle_important", {id: market.id, messageId: 0}) }}'.replace('/0/', '/' + messageId + '/');
+
+            fetch(toggleUrl, {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.error) {
+                    alert('Erreur : ' + data.error);
+                    return;
+                }
+                msgDiv.dataset.important = data.important ? '1' : '0';
+                var icon = starBtn.querySelector('i');
+                if (data.important) {
+                    starBtn.classList.add('is-important');
+                    icon.classList.remove('fa-regular');
+                    icon.classList.add('fa-solid');
+                } else {
+                    starBtn.classList.remove('is-important');
+                    icon.classList.remove('fa-solid');
+                    icon.classList.add('fa-regular');
+                }
+            })
+            .catch(function() {
+                alert('Erreur de connexion.');
+            });
+            return;
+        }
+
         var btn = e.target.closest('.btn-delete-msg');
         if (!btn) return;
         var msgDiv = btn.closest('.chat-msg');
@@ -321,7 +407,7 @@
 
         if (!confirm('Supprimer ce message de la conversation ?')) return;
 
-        var deleteUrl = '{{ path("app_market_chat_delete", {id: market.id, messageId: 0}) }}'.replace(/\/0$/, '/' + messageId);
+        var deleteUrl = '{{ path("app_market_chat_delete", {id: market.id, messageId: 0}) }}'.replace('/0/', '/' + messageId + '/');
 
         fetch(deleteUrl, {
             method: 'DELETE',
@@ -358,7 +444,7 @@
             .then(function(data) {
                 if (data.messages && data.messages.length > 0) {
                     data.messages.forEach(function(m) {
-                        addMessage(m.role, m.content, m.sources, m.createdAt, m.id);
+                        addMessage(m.role, m.content, m.sources, m.createdAt, m.id, m.important !== false);
                     });
                 }
             });
@@ -384,9 +470,11 @@
         .then(function(data) {
             if (data.userMessageId) {
                 userDiv.dataset.messageId = data.userMessageId;
+                userDiv.dataset.important = data.important === false ? '0' : '1';
                 var innerDiv = userDiv.querySelector('div');
                 if (innerDiv && !innerDiv.querySelector('.btn-delete-msg')) {
-                    innerDiv.insertAdjacentHTML('afterbegin', '<button type="button" class="btn-delete-msg" title="Supprimer ce message"><i class="fas fa-times"></i></button>');
+                    var starHtml = starIconHtml(data.important !== false);
+                    innerDiv.insertAdjacentHTML('afterbegin', starHtml + '<button type="button" class="btn-delete-msg" title="Supprimer ce message"><i class="fas fa-times"></i></button>');
                 }
             }
 
@@ -394,7 +482,7 @@
                 var assistantDiv = addMessage('assistant', 'Analyse en cours... ⏳', [], null, null);
                 pollForResult(data.jobId, assistantDiv);
             } else if (data.reply) {
-                addMessage('assistant', data.reply, data.sources || [], null, data.assistantMessageId || null);
+                addMessage('assistant', data.reply, data.sources || [], data.createdAt || null, data.assistantMessageId || null, data.important !== false);
                 setLoading(false);
             } else {
                 addMessage('assistant', 'Erreur de réponse.', [], null, null);
@@ -419,11 +507,15 @@
                 if (innerDiv) {
                     innerDiv.innerHTML = renderMarkdown(data.result?.answer || '');
                 }
-                if (!innerDiv.querySelector('.btn-delete-msg')) {
-                    innerDiv.insertAdjacentHTML('afterbegin', '<button type="button" class="btn-delete-msg" title="Supprimer ce message"><i class="fas fa-times"></i></button>');
-                }
                 if (data.assistantMessageId) {
                     assistantDiv.dataset.messageId = data.assistantMessageId;
+                    assistantDiv.dataset.important = data.important === false ? '0' : '1';
+                }
+                if (!innerDiv.querySelector('.btn-delete-msg')) {
+                    var starHtml = data.assistantMessageId
+                        ? starIconHtml(data.important !== false)
+                        : '';
+                    innerDiv.insertAdjacentHTML('afterbegin', starHtml + '<button type="button" class="btn-delete-msg" title="Supprimer ce message"><i class="fas fa-times"></i></button>');
                 }
                 setLoading(false);
             } else if (data.status === 'error') {
@@ -631,6 +723,217 @@
 
         if (indexedDocsTab) {
             indexedDocsTab.addEventListener('click', function() { loadIndexedDocs(); });
+        }
+
+        var reportsTab = document.getElementById('tab-reports-btn');
+        var reportsBody = document.getElementById('reports-list-body');
+        var reportsLoaded = false;
+        var btnGenerateReportTab = document.getElementById('btn-generate-report-tab');
+        var pendingPollers = {};
+
+        function escapeHtml(s) {
+            if (!s) return '';
+            var d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
+        function formatDate(iso) {
+            if (!iso) return '?';
+            var d = new Date(iso);
+            if (isNaN(d.getTime())) return iso;
+            return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear() + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+        }
+
+        function statusBadge(status) {
+            if (status === 'pending') return '<span class="badge bg-warning text-dark">En cours</span>';
+            if (status === 'error') return '<span class="badge bg-danger">Erreur</span>';
+            if (status === 'done') return '<span class="badge bg-success">OK</span>';
+            return '<span class="badge bg-secondary">' + escapeHtml(status) + '</span>';
+        }
+
+        function statusIcon(status) {
+            if (status === 'pending') return '<i class="fas fa-spinner fa-spin text-warning"></i>';
+            if (status === 'error') return '<i class="fas fa-exclamation-triangle text-danger"></i>';
+            if (status === 'done') return '<i class="fas fa-check-circle text-success"></i>';
+            return '<i class="fas fa-question-circle text-secondary"></i>';
+        }
+
+        function buildRow(r, marketId) {
+            var pdfBtn = (r.status === 'done')
+                ? '<a href="/user/market/' + marketId + '/report/pdf?reportId=' + r.id + '" target="_blank" class="btn btn-sm btn-outline-danger" title="Télécharger en PDF"><i class="fas fa-file-pdf"></i></a>'
+                : '<button type="button" class="btn btn-sm btn-outline-danger" disabled style="opacity:0.4;"><i class="fas fa-file-pdf"></i></button>';
+
+            return '' +
+                '<div class="report-row list-group-item d-flex justify-content-between align-items-center" data-report-id="' + r.id + '" data-status="' + r.status + '">' +
+                    '<div class="d-flex align-items-center gap-2 flex-grow-1">' +
+                        '<div class="report-row-icon">' + statusIcon(r.status) + '</div>' +
+                        '<div>' +
+                            '<strong>Rapport #' + r.id + '</strong> <span class="report-row-badge">' + statusBadge(r.status) + '</span>' +
+                            '<br><small class="text-muted report-row-date">' + escapeHtml(formatDate(r.createdAt)) + '</small>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="btn-group btn-group-sm" role="group">' +
+                        pdfBtn +
+                        '<button type="button" class="btn btn-outline-danger btn-delete-report" title="Supprimer"><i class="fas fa-trash"></i></button>' +
+                    '</div>' +
+                '</div>';
+        }
+
+        function updateRow(reportId, status) {
+            var row = reportsBody.querySelector('[data-report-id="' + reportId + '"]');
+            if (!row) return;
+            row.dataset.status = status;
+            row.querySelector('.report-row-icon').innerHTML = statusIcon(status);
+            row.querySelector('.report-row-badge').innerHTML = statusBadge(status);
+
+            var actions = row.querySelector('.btn-group');
+            var pdfBtn = actions.querySelector('a, button');
+            if (status === 'done') {
+                if (pdfBtn.tagName === 'BUTTON') {
+                    var a = document.createElement('a');
+                    a.href = '/user/market/' + '{{ market.id }}' + '/report/pdf?reportId=' + reportId;
+                    a.target = '_blank';
+                    a.className = 'btn btn-sm btn-outline-danger';
+                    a.title = 'Télécharger en PDF';
+                    a.innerHTML = '<i class="fas fa-file-pdf"></i>';
+                    pdfBtn.parentNode.replaceChild(a, pdfBtn);
+                }
+            } else if (status === 'error' || status === 'pending') {
+                if (pdfBtn.tagName === 'A') {
+                    var b = document.createElement('button');
+                    b.type = 'button';
+                    b.className = 'btn btn-sm btn-outline-danger';
+                    b.disabled = true;
+                    b.style.opacity = '0.4';
+                    b.innerHTML = '<i class="fas fa-file-pdf"></i>';
+                    pdfBtn.parentNode.replaceChild(b, pdfBtn);
+                }
+            }
+        }
+
+        function renderReports(reports) {
+            if (!reportsBody) return;
+            if (!reports || reports.length === 0) {
+                reportsBody.innerHTML = '<div class="alert alert-info mb-0 m-3">Aucun rapport généré pour ce marché.</div>';
+                return;
+            }
+            var html = '<div class="list-group list-group-flush">';
+            reports.forEach(function(r) {
+                html += buildRow(r, '{{ market.id }}');
+            });
+            html += '</div>';
+            reportsBody.innerHTML = html;
+
+            reports.forEach(function(r) {
+                if (r.status === 'pending') {
+                    startPolling(r.id);
+                }
+            });
+        }
+
+        function startPolling(reportId) {
+            if (pendingPollers[reportId]) return;
+            var marketId = '{{ market.id }}';
+            var tick = function() {
+                fetch('/user/market/' + marketId + '/report/poll/' + reportId, {
+                    method: 'GET',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.status === 'done') {
+                        updateRow(reportId, 'done');
+                        delete pendingPollers[reportId];
+                    } else if (data.status === 'error') {
+                        updateRow(reportId, 'error');
+                        delete pendingPollers[reportId];
+                    } else {
+                        pendingPollers[reportId] = setTimeout(tick, 2000);
+                    }
+                })
+                .catch(function() {
+                    pendingPollers[reportId] = setTimeout(tick, 3000);
+                });
+            };
+            pendingPollers[reportId] = setTimeout(tick, 1000);
+        }
+
+        function loadReports() {
+            if (!reportsBody) return;
+            if (!reportsLoaded) {
+                reportsLoaded = true;
+            }
+            fetch('/user/market/{{ market.id }}/report/list')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    renderReports(data.reports || []);
+                })
+                .catch(function() {
+                    reportsBody.innerHTML = '<div class="alert alert-danger mb-0 m-3">Erreur lors du chargement.</div>';
+                });
+        }
+
+        if (reportsTab) {
+            reportsTab.addEventListener('click', function() {
+                loadReports();
+            });
+        }
+
+        if (btnGenerateReportTab) {
+            btnGenerateReportTab.addEventListener('click', function() {
+                var marketId = btnGenerateReportTab.dataset.marketId;
+                btnGenerateReportTab.disabled = true;
+                var originalHtml = btnGenerateReportTab.innerHTML;
+                btnGenerateReportTab.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Génération...';
+
+                fetch('/user/market/' + marketId + '/report/generate', {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    btnGenerateReportTab.disabled = false;
+                    btnGenerateReportTab.innerHTML = originalHtml;
+                    if (data.error) {
+                        alert('Erreur : ' + data.error);
+                        return;
+                    }
+                    loadReports();
+                })
+                .catch(function() {
+                    btnGenerateReportTab.disabled = false;
+                    btnGenerateReportTab.innerHTML = originalHtml;
+                    alert('Erreur de connexion.');
+                });
+            });
+        }
+
+        if (reportsBody) {
+            reportsBody.addEventListener('click', function(e) {
+                var delBtn = e.target.closest('.btn-delete-report');
+                if (!delBtn) return;
+                var item = delBtn.closest('[data-report-id]');
+                if (!item) return;
+                var reportId = item.dataset.reportId;
+                if (!confirm('Supprimer ce rapport ?')) return;
+
+                fetch('/user/market/{{ market.id }}/report/' + reportId, {
+                    method: 'DELETE',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.error) { alert('Erreur : ' + data.error); return; }
+                    if (pendingPollers[reportId]) {
+                        clearTimeout(pendingPollers[reportId]);
+                        delete pendingPollers[reportId];
+                    }
+                    item.remove();
+                })
+                .catch(function() { alert('Erreur de connexion.'); });
+            });
         }
     });
 })();

@@ -9,6 +9,7 @@ use App\Form\MarketEditType;
 use App\Repository\MarketRepository;
 use App\Service\AmoxtliService;
 use App\Service\BoampFinderService;
+use App\Service\DompdfFactory;
 use App\Service\ScoringAgentService;
 use Bnine\FilesBundle\Service\FileService;
 use Doctrine\ORM\EntityManagerInterface;
@@ -21,6 +22,11 @@ use Symfony\Component\Routing\Attribute\Route;
 class MarketController extends AbstractController
 {
     use LayoutRenderTrait;
+
+    public function __construct(
+        private DompdfFactory $dompdfFactory,
+    ) {
+    }
 
     #[Route('/user/market', name: 'app_market_list')]
     public function list(MarketRepository $repository): Response
@@ -195,13 +201,13 @@ class MarketController extends AbstractController
 
         $chatMessages = $chatRepo->findRecentForMarket($id, 0);
 
-        $html = $this->renderView('market/print.html.twig', [
+        $html = $this->renderView('market/market_print.html.twig', [
             'market' => $market,
             'products' => $products,
             'chatMessages' => $chatMessages,
         ]);
 
-        $dompdf = new \Dompdf\Dompdf();
+        $dompdf = $this->dompdfFactory->create();
         $dompdf->loadHtml($html);
         $dompdf->setPaper('A4', 'portrait');
         $dompdf->render();

@@ -1,0 +1,192 @@
+.markdown-body {
+  box-sizing: border-box;
+  min-width: 200px;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 35px;
+  font-family: "Open Sans Regular";
+}
+
+.markdown-body pre code {
+  overflow-wrap: break-word;
+  white-space: break-spaces;
+  font-family: "Hack Regular";
+}
+
+.markdown-body li>p {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+.markdown-body a {
+  color: var(--third-background-color) !important;
+}
+
+.markdown-body .title {
+  margin-top: 3em;
+  /*background-color: #0f2f3f;*/
+  padding: 1em;
+  font-family: "Space Mono Regular";
+  color: #329aca;
+  color: var(--first-level-title-color);
+  text-transform: uppercase;
+  font-size: 4em;
+  text-align: center;
+  line-height: 0.9em
+}
+
+.markdown-body .subtitle {
+  font-family: "Hack Regular";
+  text-align: center;
+  font-size: 0.7em;
+  vertical-align: middle;
+  color: var(--fourth-background-color);
+  text-transform: initial;
+}
+
+h1 {
+  font-family: "Space Mono Regular";
+  color: #329aca;
+  color: var(--first-level-title-color);
+  text-transform: uppercase;
+}
+
+h2 {
+  font-family: "Hack Regular";
+  text-transform: uppercase;
+  color: #329aca;
+  color: var(--first-level-title-color);
+  border-bottom: none !important;
+}
+
+h3,
+h4,
+h5 {
+  color: var(--other-level-title-color);
+}
+
+h3,
+h4,
+h5 {
+  font-family: "Hack Bold";
+}
+
+b,
+strong {
+  color: var(--strong-color);
+}
+
+@media (max-width: 767px) {
+  .markdown-body {
+    padding: 10px;
+  }
+}
+
+#logo {
+  display: none;
+}
+
+#gears {
+  position: absolute;
+  overflow: hidden;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 100%;
+  z-index: -1;
+}
+
+#gears .gear {
+  background-color: transparent;
+}
+
+#gears .g1 {
+  position: absolute;
+  top: -160px;
+  left: -160px;
+  transform: scale(0.7);
+}
+
+#gears .g2 {
+  position: absolute;
+  top: -200px;
+  right: -200px;
+  transform: scale(0.6);
+}
+
+#gears .g3 {
+  position: absolute;
+  transform: scale(0.5);
+  top: -265px;
+  left: 41px;
+}
+
+#gears .g4 {
+  position: absolute;
+  right: 90px;
+  top: -360px;
+  transform: scale(0.7) rotateZ(60deg);
+}
+
+#gears .g5 {
+  position: absolute;
+  left: -204px;
+  top: 85px;
+  transform: scale(0.6);
+}
+
+.break-page {
+  page-break-after: always;
+}
+
+
+
+.grid .tick {
+  stroke: lightgrey;
+  opacity: 0.3;
+  shape-rendering: crispEdges;
+}
+
+.grid path {
+  stroke-width: 0;
+}
+
+#tag {
+  color: white;
+  background: #fa283d;
+  width: 150px;
+  position: absolute;
+  display: none;
+  padding: 3px 6px;
+  margin-left: -80px;
+  font-size: 11px;
+}
+
+#tag:before {
+  border: solid transparent;
+  content: ' ';
+  height: 0;
+  left: 50%;
+  margin-left: -5px;
+  position: absolute;
+  width: 0;
+  border-width: 10px;
+  border-bottom-color: #fa283d;
+  top: -20px;
+}
+
+.taskText {
+  fill: white;
+  text-anchor: middle;
+}
+
+.taskTextOutsideRight {
+  fill: black;
+  text-anchor: start;
+}
+
+.taskTextOutsideLeft {
+  fill: black;
+  text-anchor: end;
+}

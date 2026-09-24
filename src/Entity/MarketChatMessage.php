@@ -33,6 +33,9 @@ class MarketChatMessage
     #[ORM\Column(nullable: true)]
     private ?\DateTime $createdAt = null;
 
+    #[ORM\Column(type: 'boolean', options: ['default' => true])]
+    private bool $important = true;
+
     public function __construct()
     {
         $this->createdAt = new \DateTime();
@@ -112,6 +115,18 @@ class MarketChatMessage
     public function setCreatedAt(?\DateTime $createdAt): static
     {
         $this->createdAt = $createdAt;
+
+        return $this;
+    }
+
+    public function isImportant(): bool
+    {
+        return $this->important;
+    }
+
+    public function setImportant(bool $important): static
+    {
+        $this->important = $important;
 
         return $this;
     }

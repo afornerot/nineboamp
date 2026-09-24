@@ -1,0 +1,102 @@
+@page {
+  size: portrait;
+}
+
+@media print {
+  @page :first {
+    /*background-color: var(--first-background-color);*/
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  @page {
+    padding-top: 1cm;
+    padding-bottom: 1cm;
+  }
+
+  body,
+  .markdown-body {
+    background-color: transparent;
+  }
+
+  .title {
+    margin-top: calc(0.3 * 100vh) !important;
+    border-bottom: none;
+    page-break-after: always;
+  }
+
+  .subtitle {
+    text-align: center;
+    margin-bottom: 2em;
+  }
+
+  h1 {
+    page-break-before: always;
+  }
+
+  h1:first-of-type {
+    page-break-before: avoid;
+    font-size: 3em;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  ul,
+  ol,
+  pre {
+    break-before: avoid;
+    page-break-before: avoid;
+  }
+
+  pre,
+  code,
+  p,
+  tr {
+    break-inside: avoid;
+  }
+
+  ul,
+  ol {
+    break-inside: auto;
+  }
+
+  ul>ul,
+  ol>ul,
+  ul>ol,
+  ol>ol {
+    break-inside: avoid;
+  }
+
+  img {
+    max-height: 90vh;
+    display: block;
+    margin: auto;
+  }
+
+  #logo {
+    max-height: 3em;
+    display: block;
+    margin: auto;
+    background-color: transparent;
+    position: absolute;
+    bottom: 2cm;
+    left: 50%;
+    margin-left: -92px;
+  }
+
+  .markdown-body h1:first-of-type::after {
+    display: block !important;
+    color: white;
+    font-size: 0.8em;
+    line-height: 2em;
+    text-align: center;
+    float: none;
+  }
+}

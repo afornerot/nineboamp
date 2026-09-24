@@ -95,6 +95,7 @@ class MarketChatController extends AbstractController
                 'reply' => $reply,
                 'sources' => $allSources,
                 'createdAt' => $assistantMessage->getCreatedAt()?->format('c'),
+                'important' => $assistantMessage->isImportant(),
             ]);
         }
 
@@ -104,6 +105,7 @@ class MarketChatController extends AbstractController
             'reply' => null,
             'pending' => true,
             'jobId' => $jobId,
+            'important' => true,
         ]);
     }
 
@@ -143,6 +145,7 @@ class MarketChatController extends AbstractController
                 'status' => 'done',
                 'assistantMessageId' => $assistantMessage->getId(),
                 'result' => $result['result'],
+                'important' => $assistantMessage->isImportant(),
             ]);
         }
 
@@ -287,6 +290,28 @@ class MarketChatController extends AbstractController
         return new JsonResponse(['success' => true]);
     }
 
+    #[Route('/user/market/{id}/chat/{messageId}/important', name: 'app_market_chat_toggle_important', methods: ['POST'])]
+    public function toggleImportant(int $id, int $messageId): JsonResponse
+    {
+        $market = $this->marketRepo->find($id);
+        if (!$market) {
+            return new JsonResponse(['error' => 'Marché introuvable'], 404);
+        }
+
+        $message = $this->chatRepo->find($messageId);
+        if (!$message || $message->getMarket()?->getId() !== $id) {
+            return new JsonResponse(['error' => 'Message introuvable'], 404);
+        }
+
+        $message->setImportant(!$message->isImportant());
+        $this->em->flush();
+
+        return new JsonResponse([
+            'id' => $message->getId(),
+            'important' => $message->isImportant(),
+        ]);
+    }
+
     #[Route('/user/market/{id}/chat/history', name: 'app_market_chat_history', methods: ['GET'])]
     public function history(int $id): JsonResponse
     {
@@ -304,6 +329,7 @@ class MarketChatController extends AbstractController
                 'content' => $m->getContent(),
                 'sources' => $m->getSources(),
                 'createdAt' => $m->getCreatedAt()?->format('c'),
+                'important' => $m->isImportant(),
             ];
         }, $messages);
 

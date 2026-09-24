@@ -29,4 +29,23 @@ class MarketChatMessageRepository extends ServiceEntityRepository
 
         return $qb->getQuery()->getResult();
     }
+
+    /**
+     * @return MarketChatMessage[]
+     */
+    public function findImportantForMarket(int $marketId, int $limit = 50): array
+    {
+        $qb = $this->createQueryBuilder('m')
+            ->andWhere('m.market = :marketId')
+            ->andWhere('m.important = :important')
+            ->setParameter('marketId', $marketId)
+            ->setParameter('important', true)
+            ->orderBy('m.createdAt', 'ASC');
+
+        if ($limit > 0) {
+            $qb->setMaxResults($limit);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
 }

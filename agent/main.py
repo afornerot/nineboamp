@@ -1,6 +1,7 @@
 """
 Agent API - Simple OpenAI-based agent with function calling.
-Supports async jobs for long-running requests (chat and scoring).
+Supports async jobs for long-running requests (chat, scoring, reports).
+Hot-reload via docker volume mount (./agent).
 """
 import os
 import json
@@ -82,6 +83,22 @@ def load_scoring_user_prompt() -> str:
     """Load scoring user prompt from markdown file."""
     return load_prompt_from_file(
         "/app/src/DataFixtures/data/scoring/scoring.user.md",
+        ""
+    )
+
+
+def load_report_system_prompt() -> str:
+    """Load report system prompt from markdown file."""
+    return load_prompt_from_file(
+        "/app/src/DataFixtures/data/scoring/report.system.md",
+        "Tu es un consultant senior en marchés publics pour Cadoles."
+    )
+
+
+def load_report_user_prompt() -> str:
+    """Load report user prompt from markdown file."""
+    return load_prompt_from_file(
+        "/app/src/DataFixtures/data/scoring/report.user.md",
         ""
     )
 
@@ -285,6 +302,24 @@ class ScoreResponse(BaseModel):
     priority: str
     explanation: str
     products: list[dict]
+    tools_used: list[str] = Field(default_factory=list)
+    error: Optional[str] = None
+
+
+class ReportRequest(BaseModel):
+    market_id: int
+    title: str
+    buyer: str
+    description: str
+    amount: str
+    deadline: Optional[str] = None
+    products: list[dict] = Field(default_factory=list)
+    catalogue: str = ""
+    chat_history: list[dict] = Field(default_factory=list)
+
+
+class ReportResponse(BaseModel):
+    markdown: str
     tools_used: list[str] = Field(default_factory=list)
     error: Optional[str] = None
 
@@ -539,6 +574,166 @@ async def process_score(job_id: str, request: ScoreRequest) -> None:
         save_job(job_id, {"status": "error", "result": {"error": f"Erreur inattendue: {str(e)}"}})
 
 
+async def process_report(job_id: str, request: ReportRequest) -> None:
+    """Process report generation in background and save result to job file."""
+    save_job(job_id, {"status": "pending", "result": None})
+
+    try:
+        config = get_ai_config()
+
+        system_prompt = load_report_system_prompt()
+        user_prompt_template = load_report_user_prompt()
+
+        metadata = (
+            f"- ID: {request.market_id}\n"
+            f"- Titre: {request.title}\n"
+            f"- Acheteur: {request.buyer or 'N/A'}\n"
+            f"- Montant: {request.amount or 'N/A'}\n"
+            f"- Deadline: {request.deadline or 'Non précisée'}"
+        )
+
+        products_str = ""
+        if request.products:
+            for p in request.products:
+                name = p.get("name", "Unknown")
+                desc = p.get("description", "")
+                keywords = p.get("keywords", "")
+                sectors = p.get("sectors", "")
+                products_str += f"- **{name}**"
+                if desc:
+                    products_str += f"\n  Description: {desc[:200]}"
+                if keywords:
+                    products_str += f"\n  Mots-clés: {keywords}"
+                if sectors:
+                    products_str += f"\n  Secteurs: {sectors}"
+                products_str += "\n"
+        else:
+            products_str = "Aucun produit identifié par le scoring."
+
+        chat_history_str = ""
+        if request.chat_history:
+            for msg in request.chat_history:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                label = "Utilisateur" if role == "user" else "Assistant"
+                chat_history_str += f"- **{label}**: {content[:1000]}\n"
+        else:
+            chat_history_str = "Aucun message marqué comme important."
+
+        user_prompt = (
+            user_prompt_template
+            .replace("{{metadata}}", metadata)
+            .replace("{{description}}", request.description[:4000] if request.description else "Non disponible")
+            .replace("{{products}}", products_str)
+            .replace("{{catalogue}}", request.catalogue or "Catalogue non fourni.")
+            .replace("{{chatHistory}}", chat_history_str)
+        )
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        client = httpx.AsyncClient(timeout=180.0)
+        tools_used = []
+
+        try:
+            response = await client.post(
+                f"{config['base_url']}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {config['api_key']}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": config["model"],
+                    "messages": messages,
+                    "tools": get_tools(),
+                    "tool_choice": "auto",
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+
+        except Exception as e:
+            await client.aclose()
+            save_job(job_id, {
+                "status": "error",
+                "result": {"error": f"Erreur de connexion à l'API: {str(e)}"},
+            })
+            return
+
+        choice = data["choices"][0]
+        message_content = choice["message"]
+
+        while message_content.get("tool_calls"):
+            for tool_call in message_content["tool_calls"]:
+                tool_name = tool_call["function"]["name"]
+                arguments = json.loads(tool_call["function"]["arguments"])
+                tools_used.append(tool_name)
+
+                tool_result = await execute_tool(tool_name, arguments)
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call["id"],
+                    "content": tool_result,
+                })
+
+            try:
+                response = await client.post(
+                    f"{config['base_url']}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {config['api_key']}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": config["model"],
+                        "messages": messages,
+                        "tools": get_tools(),
+                        "tool_choice": "auto",
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+                choice = data["choices"][0]
+                message_content = choice["message"]
+            except Exception as e:
+                await client.aclose()
+                save_job(job_id, {
+                    "status": "error",
+                    "result": {
+                        "error": f"Erreur lors de l'exécution des outils: {str(e)}",
+                        "tools_used": tools_used,
+                    },
+                })
+                return
+
+        await client.aclose()
+
+        markdown = message_content.get("content", "").strip()
+
+        if not markdown:
+            save_job(job_id, {
+                "status": "error",
+                "result": {"error": "Réponse vide de l'agent", "tools_used": tools_used},
+            })
+            return
+
+        save_job(job_id, {
+            "status": "done",
+            "result": {
+                "markdown": markdown,
+                "tools_used": tools_used,
+            },
+        })
+
+    except Exception as e:
+        save_job(job_id, {
+            "status": "error",
+            "result": {"error": f"Erreur inattendue: {str(e)}"},
+        })
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "agent"}
@@ -631,10 +826,59 @@ async def score_market(request: ScoreRequest):
 async def get_score_result(job_id: str):
     """Get the result of a scoring job."""
     job = load_job(job_id)
-    
+
     if not job:
         return {"status": "not_found", "result": None}
-    
+
+    return job
+
+
+@app.post("/report")
+async def report_market(request: ReportRequest):
+    """Start a report generation job - uses subprocess to avoid async issues."""
+    import subprocess
+    import sys
+    cleanup_old_jobs()
+
+    job_id = str(uuid.uuid4())
+    save_job(job_id, {"status": "pending", "result": None})
+
+    request_data = {
+        "market_id": request.market_id,
+        "title": request.title,
+        "buyer": request.buyer,
+        "description": request.description,
+        "amount": request.amount,
+        "deadline": request.deadline,
+        "products": request.products,
+        "catalogue": request.catalogue,
+        "chat_history": request.chat_history,
+    }
+
+    log_file = f"/tmp/jobs/{job_id}.log"
+
+    with open(log_file, "w") as f:
+        f.write(f"Starting report job {job_id}\n")
+        f.write(f"Request: {json.dumps({k: v if k != 'description' else v[:100] for k, v in request_data.items()})}\n")
+
+    subprocess.Popen(
+        [sys.executable, "/app/agent/run_job.py", "report", job_id, json.dumps(request_data)],
+        stdout=open(log_file, "a"),
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+
+    return {"job_id": job_id}
+
+
+@app.get("/report/result/{job_id}")
+async def get_report_result(job_id: str):
+    """Get the result of a report job."""
+    job = load_job(job_id)
+
+    if not job:
+        return {"status": "not_found", "result": None}
+
     return job
 
 

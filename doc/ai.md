@@ -1,13 +1,8 @@
 # IA / LLM
 
-L'application utilise un **agent IA** qui orchestre les appels LLM via **function calling** OpenAI. Deux implémentations, au contrat HTTP strictement identique, coexistent dans le container :
+L'application utilise un **agent IA** qui orchestre les appels LLM via **function calling**. Il est écrit en **Go** avec la bibliothèque [genai](https://github.com/Bornholm/genai), tourne dans le container sur **`127.0.0.1:8000`** (le port que PHP appelle) — voir [Agent Go (port 8000)](#agent-go-port-8000).
 
-| | **Agent Go** (retenu) | **Agent Python** (conservé) |
-|---|---|---|
-| Port interne | **`127.0.0.1:8000`** — celui que PHP appelle | `127.0.0.1:8001` |
-| Code | `agent-go/` | `agent/` |
-
-> **Note** : L'agent Python est une implémentation "maison" utilisant httpx pour les appels directs à l'API OpenAI. Ce n'est **pas** LlamaIndex. L'agent Go est un portage fidèle construit sur [genai](https://github.com/Bornholm/genai) — voir [Agent Go (port 8000)](#agent-go-port-8000).
+> **Note** : l'agent a été porté depuis une implémentation Python "maison" (httpx, sans LlamaIndex), supprimée du dépôt — l'historique git fait foi. Contrat HTTP, prompts et outils sont strictement identiques.
 
 ## Configuration
 
@@ -49,7 +44,7 @@ L'agent IA tourne dans le container Docker sur le port interne **8000** et utili
 
 **Historique des conversations** : En base de données (`market_chat_message`), récupéré à chaque requête pour reconstruire le contexte.
 
-**Fichiers temporaires** : `/tmp/jobs/` (agent Python) et `/tmp/jobs-go/` (agent Go) — fichiers `.json` et `.log` des jobs, nettoyés automatiquement après expiration.
+**Fichiers temporaires** : `/tmp/jobs-go/` (fichiers `.json` des jobs, nettoyés automatiquement après expiration).
 
 ### Endpoint
 
@@ -59,16 +54,16 @@ L'agent IA tourne dans le container Docker sur le port interne **8000** et utili
 
 ## Agent Go (port 8000)
 
-L'agent écrit en **Go** avec la bibliothèque [`github.com/Bornholm/genai`](https://github.com/Bornholm/genai) occupe le port interne **8000** — celui que PHP appelle déjà : **aucune modification PHP n'a été nécessaire**. L'agent Python, au contrat HTTP rigoureusement identique, a été relégué sur le port **8001** (conservé pour comparaison et retour arrière).
+L'agent est écrit en **Go** avec la bibliothèque [`github.com/Bornholm/genai`](https://github.com/Bornholm/genai) et occupe le port interne **8000** — celui que PHP appelle : **aucune modification PHP n'a été nécessaire** lors de la migration.
 
-| | Agent Go | Agent Python |
-|---|---|---|
-| Code | `agent-go/` | `agent/` |
-| Port interne | `127.0.0.1:8000` (appelé par PHP) | `127.0.0.1:8001` |
-| Fichiers de jobs | `/tmp/jobs-go/` | `/tmp/jobs/` |
-| Lancement (Docker) | `/usr/local/bin/nineagent` (binaire statique compilé en multi-stage) | `uvicorn agent.main:app` |
+| | Agent (genai) |
+|---|---|
+| Code | `agent-go/` |
+| Port interne | `127.0.0.1:8000` (appelé par PHP) |
+| Fichiers de jobs | `/tmp/jobs-go/` |
+| Lancement (Docker) | `/usr/local/bin/nineagent` (binaire statique compilé en multi-stage `agentbuild`) |
 
-Garanties de parité :
+Points clés :
 
 - Même contrat HTTP : `GET /health`, `POST /chat|/score|/report → {job_id}`,
   `GET …/result/{id} → {status, result}`, `DELETE /chat/{id} → {deleted}`.
@@ -80,7 +75,7 @@ Garanties de parité :
 - Scoring : tentative de sortie JSON structurée (`response_format`), repli sur un
   appel texte simple si le provider refuse, parsing tolérant (JSON entouré de
   texte, valeurs manquantes → défauts `score: 0`, `priority: C`).
-- Boucle d'outils bornée à **10 itérations** (l'agent Python est non borné).
+- Boucle d'outils bornée à **10 itérations**.
 
 ### Développement
 
@@ -100,8 +95,8 @@ Chargement de l'environnement : `.env.local` prime sur `.env`
 (`set-if-absent`, comme en Python), puis les variables `AI_MODEL` / `AI_API_KEY` /
 `AI_BASE_URL` sont converties en `GENAI_CHAT_COMPLETION_*` attendues par genai.
 
-Dans Docker, `misc/script/reconfigure.sh` lance `nineagent` à côté d'uvicorn et
-surveille les deux processus ; `misc/docker/Dockerfile` compile le binaire dans
+Dans Docker, `misc/script/reconfigure.sh` lance `nineagent` et le surveille avec
+les autres services ; `misc/docker/Dockerfile` compile le binaire dans
 la stage `agentbuild` (`golang:1.25-alpine`).
 
 ## AiService (Appels directs)
@@ -168,7 +163,6 @@ un log d'erreur est émis (`var/log/dev.log` → `app.ERROR: AiService: ...`).
 
 | Symptôme | Cause probable | Action |
 |---|---|---|
-| "Erreur de connexion" dans le chat | Agent Go non démarré ou timeout | Vérifier que le container est UP et que l'agent écoute sur `:8000` (`docker logs nineboamp`) |
-| Agent Python injoignable sur `:8001` | `uvicorn` absent ou crash au démarrage | `docker logs nineboamp` ; `var/log/startup.log` contient `STOP AGENT` si le processus est mort |
+| "Erreur de connexion" dans le chat | Agent non démarré ou timeout | Vérifier que le container est UP et que l'agent écoute sur `:8000` (`docker logs nineboamp`) |
 | LLM répond avec les placeholders `{{...}}` non remplacés | Prompts non à jour | L'agent charge les prompts au démarrage ; redémarrer le container |
 | Rate limit dépassé | Trop de requêtes simultanées | Patienter ou ajuster `AI_MODEL` / `AI_BASE_URL` |

@@ -30,7 +30,6 @@ services:
       - ./config:/app/config:delegated
       - ./src:/app/src:delegated
       - ./misc:/app/misc:delegated
-      - ./agent:/app/agent
       - ./public/lib:/app/public/lib:delegated
       - ./var:/app/var
       - ./.env.local:/app/.env.local

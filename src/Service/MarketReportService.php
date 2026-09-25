@@ -93,7 +93,7 @@ class MarketReportService
     }
 
     /**
-     * Build the JSON payload sent to the agent Python endpoint.
+     * Build the JSON payload sent to the agent endpoint.
      *
      * @return array<string, mixed>
      */

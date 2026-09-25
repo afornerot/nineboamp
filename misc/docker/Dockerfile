@@ -19,23 +19,15 @@ RUN tar -xzf /tmp/amoxtli.tar.gz -C /tmp \
  && chmod +x /usr/local/bin/amoxtli \
  && rm -rf /tmp/amoxtli.tar.gz /tmp/LICENSE /tmp/README.md /tmp/docs
 
-# Agent Go (binaire statique), sert le port 8000 que PHP appelle déjà (l'agent Python passe sur 8001)
+# Agent Go (binaire statique) — sert le port 8000 que PHP appelle
 COPY --from=agentbuild --chown=root:root /out/nineagent /usr/local/bin/nineagent
 
 WORKDIR /app
 COPY --chown=apache:apache . .
 
-# Python base dependencies
+# Outils du pipeline amoxtli (pdftotext, pandoc, xlsx → csv via openpyxl)
 USER root
 RUN apk add --no-cache poppler-utils pandoc python3 py3-pip build-base && pip3 install --no-cache-dir --break-system-packages openpyxl
-USER apache
-
-# Copy agent files
-COPY --chown=apache:apache agent/requirements.txt /app/agent/requirements.txt
-
-# LlamaIndex agent dependencies
-USER root
-RUN pip3 install --no-cache-dir --break-system-packages -r /app/agent/requirements.txt
 USER apache
 
 RUN composer install --no-interaction --no-scripts

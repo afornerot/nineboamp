@@ -55,7 +55,7 @@ remontent dans la recherche.
 
 ## Chat IA
 
-L'agent (Go, port 8000 — voir [IA / LLM](ai.md)) écoute sur `localhost:8000` et utilise le mechanism de **function calling** pour accéder aux documents indexés via amoxtli. L'agent Python historique tourne en parallèle sur `:8001`.
+L'agent (Go, port 8000 — voir [IA / LLM](ai.md)) écoute sur `localhost:8000` et utilise le mechanism de **function calling** pour accéder aux documents indexés via amoxtli.
 
 Endpoint : `POST /user/market/{id}/chat` (`app_market_chat`).
 

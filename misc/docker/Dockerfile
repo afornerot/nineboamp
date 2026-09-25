@@ -1,3 +1,11 @@
+# Build stage pour l'agent Go (github.com/Bornholm/genai)
+FROM golang:1.25-alpine AS agentbuild
+WORKDIR /src
+COPY agent-go/go.mod agent-go/go.sum ./
+RUN go mod download
+COPY agent-go/ ./
+RUN CGO_ENABLED=0 go build -trimpath -o /out/nineagent ./cmd/nineagent
+
 FROM reg.cadoles.com/envole/nineapache:8.5
 
 USER root
@@ -10,6 +18,9 @@ RUN tar -xzf /tmp/amoxtli.tar.gz -C /tmp \
  && mv /tmp/amoxtli /usr/local/bin/amoxtli \
  && chmod +x /usr/local/bin/amoxtli \
  && rm -rf /tmp/amoxtli.tar.gz /tmp/LICENSE /tmp/README.md /tmp/docs
+
+# Agent Go (binaire statique), sert le port 8000 que PHP appelle déjà (l'agent Python passe sur 8001)
+COPY --from=agentbuild --chown=root:root /out/nineagent /usr/local/bin/nineagent
 
 WORKDIR /app
 COPY --chown=apache:apache . .

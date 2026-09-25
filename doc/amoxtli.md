@@ -17,7 +17,7 @@
 [uploads/amoxtli/{id}/] ←──────────────  amoxtli sync     └─────┬──────┘
                                                                    │
                                                                    ▼
-                                                       [Agent Python :8000]
+                                                        [Agent Go :8000]
                                                                    │
                                                                    ├── amoxtli_search (tool)
                                                                    ├── list_documents (tool)
@@ -55,14 +55,14 @@ remontent dans la recherche.
 
 ## Chat IA
 
-L'agent Python écoute sur `localhost:8000` et utilise le mechanism de **function calling** pour accéder aux documents indexés via amoxtli.
+L'agent (Go, port 8000 — voir [IA / LLM](ai.md)) écoute sur `localhost:8000` et utilise le mechanism de **function calling** pour accéder aux documents indexés via amoxtli. L'agent Python historique tourne en parallèle sur `:8001`.
 
 Endpoint : `POST /user/market/{id}/chat` (`app_market_chat`).
 
 Workflow (`MarketChatController::chat()`) :
 
 1. **Sauvegarde** message utilisateur → `MarketChatMessage`.
-2. **Envoi à l'agent** via `AgentService` qui appelle l'agent Python sur `:8000`.
+2. **Envoi à l'agent** via `AgentService` qui appelle l'agent sur `:8000`.
 3. **L'agent** :
    - Reçoit les informations du marché (titre, acheteur, montant, deadline, score, produits, description)
    - Peut utiliser les outils `amoxtli_search` et `list_documents` pour rechercher dans les documents

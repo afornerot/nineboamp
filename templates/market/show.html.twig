@@ -304,6 +304,25 @@
     .btn-star.is-important { opacity: 1; color: #ffc107; }
     .btn-star.is-important:hover { opacity: 1; color: #e0a800; }
     .btn-star:hover { opacity: 1; color: #ffc107; }
+    .btn-copy-msg {
+        background: transparent;
+        border: none;
+        color: var(--bs-secondary-color);
+        font-size: 0.75rem;
+        padding: 0.1rem 0.3rem;
+        cursor: pointer;
+        opacity: 0;
+        transition: opacity 0.15s ease-in;
+    }
+    .chat-msg:hover .btn-copy-msg { opacity: 0.6; }
+    .btn-copy-msg:hover { opacity: 1 !important; color: #0d6efd; }
+    .chat-msg-left, .chat-msg-right {
+        display: flex;
+        gap: 0.25rem;
+    }
+    .chat-msg-left { float: left; }
+    .chat-msg-right { float: right; }
+    .chat-msg-content { clear: both; }
 </style>
 
 <script>
@@ -344,14 +363,20 @@
         div.className = 'chat-msg chat-msg-' + role;
         div.dataset.messageId = messageId || '';
         div.dataset.important = important === false ? '0' : '1';
+        div.dataset.rawContent = content;
 
         var buttons = messageId ? starIconHtml(important !== false) : '';
+        var copyBtn = messageId
+            ? '<button type="button" class="btn-copy-msg" title="Copier le message"><i class="fas fa-copy"></i></button>'
+            : '';
         var deleteBtn = messageId
             ? '<button type="button" class="btn-delete-msg" title="Supprimer ce message"><i class="fas fa-times"></i></button>'
             : '';
-        if (deleteBtn) buttons += deleteBtn;
+        var rightButtons = copyBtn + deleteBtn;
 
-        var html = '<div>' + buttons + renderMarkdown(content) + '</div>';
+        var html = '<div class="chat-msg-left">' + buttons + '</div>';
+        html += '<div class="chat-msg-right">' + rightButtons + '</div>';
+        html += '<div class="chat-msg-content">' + renderMarkdown(content) + '</div>';
         if (sources && sources.length > 0) {
             html += '<div class="chat-sources"><i class="fas fa-file-alt"></i> ' +
                 sources.map(escapeHtml).join(', ') + '</div>';
@@ -426,6 +451,24 @@
         });
     });
 
+    chatMessages.addEventListener('click', function(e) {
+        var copyBtn = e.target.closest('.btn-copy-msg');
+        if (copyBtn) {
+            var msgDiv = copyBtn.closest('.chat-msg');
+            var text = msgDiv.dataset.rawContent || '';
+            navigator.clipboard.writeText(text).then(function() {
+                var icon = copyBtn.querySelector('i');
+                icon.classList.remove('fa-copy');
+                icon.classList.add('fa-check', 'text-success');
+                setTimeout(function() {
+                    icon.classList.remove('fa-check', 'text-success');
+                    icon.classList.add('fa-copy');
+                }, 1500);
+            });
+            return;
+        }
+    });
+
     function setLoading(loading) {
         sending = loading;
         chatInput.disabled = loading;
@@ -471,10 +514,13 @@
             if (data.userMessageId) {
                 userDiv.dataset.messageId = data.userMessageId;
                 userDiv.dataset.important = data.important === false ? '0' : '1';
-                var innerDiv = userDiv.querySelector('div');
-                if (innerDiv && !innerDiv.querySelector('.btn-delete-msg')) {
-                    var starHtml = starIconHtml(data.important !== false);
-                    innerDiv.insertAdjacentHTML('afterbegin', starHtml + '<button type="button" class="btn-delete-msg" title="Supprimer ce message"><i class="fas fa-times"></i></button>');
+                var leftDiv = userDiv.querySelector('.chat-msg-left');
+                var rightDiv = userDiv.querySelector('.chat-msg-right');
+                if (leftDiv && !leftDiv.querySelector('.btn-star')) {
+                    leftDiv.innerHTML = starIconHtml(data.important !== false);
+                }
+                if (rightDiv && !rightDiv.querySelector('.btn-copy-msg')) {
+                    rightDiv.innerHTML = '<button type="button" class="btn-copy-msg" title="Copier le message"><i class="fas fa-copy"></i></button><button type="button" class="btn-delete-msg" title="Supprimer ce message"><i class="fas fa-times"></i></button>';
                 }
             }
 
@@ -503,25 +549,27 @@
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (data.status === 'done') {
-                var innerDiv = assistantDiv.querySelector('div');
-                if (innerDiv) {
-                    innerDiv.innerHTML = renderMarkdown(data.result?.answer || '');
+                var contentDiv = assistantDiv.querySelector('.chat-msg-content');
+                if (contentDiv) {
+                    contentDiv.innerHTML = renderMarkdown(data.result?.answer || '');
                 }
                 if (data.assistantMessageId) {
                     assistantDiv.dataset.messageId = data.assistantMessageId;
                     assistantDiv.dataset.important = data.important === false ? '0' : '1';
-                }
-                if (!innerDiv.querySelector('.btn-delete-msg')) {
-                    var starHtml = data.assistantMessageId
-                        ? starIconHtml(data.important !== false)
-                        : '';
-                    innerDiv.insertAdjacentHTML('afterbegin', starHtml + '<button type="button" class="btn-delete-msg" title="Supprimer ce message"><i class="fas fa-times"></i></button>');
+                    var leftDiv = assistantDiv.querySelector('.chat-msg-left');
+                    var rightDiv = assistantDiv.querySelector('.chat-msg-right');
+                    if (leftDiv && !leftDiv.querySelector('.btn-star')) {
+                        leftDiv.innerHTML = starIconHtml(data.important !== false);
+                    }
+                    if (rightDiv && !rightDiv.querySelector('.btn-copy-msg')) {
+                        rightDiv.innerHTML = '<button type="button" class="btn-copy-msg" title="Copier le message"><i class="fas fa-copy"></i></button><button type="button" class="btn-delete-msg" title="Supprimer ce message"><i class="fas fa-times"></i></button>';
+                    }
                 }
                 setLoading(false);
             } else if (data.status === 'error') {
-                var innerDiv = assistantDiv.querySelector('div');
-                if (innerDiv) {
-                    innerDiv.innerHTML = '<em style="color: red;">Erreur: ' + escapeHtml(data.result?.error || 'Une erreur est survenue') + '</em>';
+                var contentDiv = assistantDiv.querySelector('.chat-msg-content');
+                if (contentDiv) {
+                    contentDiv.innerHTML = '<em style="color: red;">Erreur: ' + escapeHtml(data.result?.error || 'Une erreur est survenue') + '</em>';
                 }
                 setLoading(false);
             } else {
@@ -529,9 +577,9 @@
             }
         })
         .catch(function() {
-            var innerDiv = assistantDiv.querySelector('div');
-            if (innerDiv) {
-                innerDiv.innerHTML = '<em style="color: red;">Erreur de connexion.</em>';
+            var contentDiv = assistantDiv.querySelector('.chat-msg-content');
+            if (contentDiv) {
+                contentDiv.innerHTML = '<em style="color: red;">Erreur de connexion.</em>';
             }
             setLoading(false);
         });

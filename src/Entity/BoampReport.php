@@ -30,6 +30,9 @@ class BoampReport
     #[ORM\Column(nullable: true)]
     private ?\DateTime $duration = null;
 
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $qualifiedMarketsJson = null;
+
     public function __construct()
     {
         $this->executedAt = new \DateTime();
@@ -122,5 +125,35 @@ class BoampReport
         return (int) $this->duration->format('H') * 3600
             + (int) $this->duration->format('i') * 60
             + (int) $this->duration->format('s');
+    }
+
+    public function getQualifiedMarketsJson(): ?string
+    {
+        return $this->qualifiedMarketsJson;
+    }
+
+    public function setQualifiedMarketsJson(?string $qualifiedMarketsJson): static
+    {
+        $this->qualifiedMarketsJson = $qualifiedMarketsJson;
+
+        return $this;
+    }
+
+    /**
+     * @return array<array{idweb: string, title: string, score: int, priority: string, buyer: string, deadline: ?string, id: int}>
+     */
+    public function getQualifiedMarkets(): array
+    {
+        if (null === $this->qualifiedMarketsJson || '' === $this->qualifiedMarketsJson) {
+            return [];
+        }
+
+        try {
+            $decoded = json_decode($this->qualifiedMarketsJson, true, 512, \JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return [];
+        }
+
+        return is_array($decoded) ? $decoded : [];
     }
 }

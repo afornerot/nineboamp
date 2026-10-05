@@ -192,6 +192,7 @@ class BoampFinderService
                 $report->setMarketsNotified($marketsNotified);
                 $this->em->flush();
                 $qualifiedMarkets[] = [
+                    'id' => $market->getId(),
                     'idweb' => $market->getIdweb(),
                     'title' => $market->getTitle(),
                     'score' => $market->getScore() ?? 0,
@@ -265,6 +266,7 @@ class BoampFinderService
             $report->setMarketsFound($marketsFound);
             $report->setMarketsQualified($marketsQualified);
             $report->setMarketsNotified($marketsNotified);
+            $report->setQualifiedMarketsJson(json_encode($qualifiedMarkets, \JSON_UNESCAPED_UNICODE));
         } catch (\Throwable $e) {
             $io?->error('Erreur durant le run : '.$e->getMessage());
             $report->setError($e->getMessage());

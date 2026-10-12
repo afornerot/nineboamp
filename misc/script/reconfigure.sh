@@ -16,7 +16,13 @@ bin/console app:init
 supercronic -quiet -no-reap /crontab &
 SUPERCRONIC_PID=$!
 
-bin/console messenger:consume async --time-limit=3600 --memory-limit=128M &
+start_messenger() {
+    while true; do
+        bin/console messenger:consume async --memory-limit=256M
+        sleep 5
+    done
+}
+start_messenger &
 MESSENGER_PID=$!
 
 # Start the Go agent (genai) on 8000, the port PHP calls

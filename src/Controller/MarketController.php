@@ -38,6 +38,7 @@ class MarketController extends AbstractController
             'usesidebar' => false,
             'title' => 'Marchés publics',
             'markets' => $markets,
+            'status_options' => Market::STATUSES,
         ]);
     }
 
@@ -218,6 +219,27 @@ class MarketController extends AbstractController
             'Content-Type' => 'application/pdf',
             'Content-Disposition' => sprintf('inline; filename="%s"', $filename),
         ]);
+    }
+
+    #[Route('/user/market/{id}/status', name: 'app_market_status', methods: ['POST'])]
+    public function updateStatus(int $id, Request $request, MarketRepository $marketRepository, EntityManagerInterface $em): JsonResponse
+    {
+        $market = $marketRepository->find($id);
+        if (!$market) {
+            return new JsonResponse(['error' => 'Marché introuvable'], 404);
+        }
+
+        $data = json_decode($request->getContent(), true);
+        $status = $data['status'] ?? null;
+
+        if (!in_array($status, Market::STATUSES, true)) {
+            return new JsonResponse(['error' => 'Statut invalide'], 400);
+        }
+
+        $market->setStatus($status);
+        $em->flush();
+
+        return new JsonResponse(['success' => true, 'status' => $market->getStatusLabel()]);
     }
 
     #[Route('/user/report', name: 'app_report_list')]

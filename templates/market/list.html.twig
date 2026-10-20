@@ -20,14 +20,14 @@
             <ul class="dropdown-menu p-2" aria-labelledby="status-filter-btn" style="min-width: 200px;">
                 <li><button type="button" class="btn btn-sm btn-link" id="status-filter-all">Tout cocher</button> | <button type="button" class="btn btn-sm btn-link" id="status-filter-none">Tout décocher</button></li>
                 <li><hr class="dropdown-divider"></li>
-                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="Detecté"> Detecté</label></li>
-                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="Qualifié"> Qualifié</label></li>
-                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="Go"> Go</label></li>
-                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="À étudier"> À étudier</label></li>
-                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="Nogo"> Nogo</label></li>
-                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="Répondu"> Répondu</label></li>
-                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="Gagné"> Gagné</label></li>
-                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="Perdu"> Perdu</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="detected"> Detecté</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="qualified"> Qualifié</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="go"> Go</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="to_study"> À étudier</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="nogo"> Nogo</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="answered"> Répondu</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="won"> Gagné</label></li>
+                <li><label class="dropdown-item"><input type="checkbox" class="form-check-input me-2" value="lost"> Perdu</label></li>
             </ul>
         </div>
     </div>
@@ -52,7 +52,7 @@
             {% for market in markets %}
             <tr>
                 <td><a href="{{ path('app_market_show', {id: market.id}) }}"><i class="fas fa-file fa-2x"></i></a></td>
-                <td>{{ market.score is not null ? market.score ~ '/100' : '?' }}</td>
+                <td data-order="{{ market.score is not null ? market.score : '0' }}">{{ market.score is not null ? market.score ~ '/100' : '?' }}</td>
                 <td data-priority="{{ market.priority }}">
                     {% if market.priority == 'A' %}<span class="badge bg-success">{{ market.priority }}</span>
                     {% elseif market.priority == 'B' %}<span class="badge bg-warning">{{ market.priority }}</span>
@@ -60,7 +60,13 @@
                 </td>
                 <td>{{ market.title|length > 60 ? market.title|slice(0, 60) ~ '…' : market.title }}</td>
                 <td>{{ market.buyer|length > 30 ? market.buyer|slice(0, 30) ~ '…' : market.buyer }}</td>
-                <td><span class="badge bg-info">{{ market.statuslabel }}</span></td>
+                <td data-status="{{ market.status }}">
+                    <select class="form-select form-select-sm market-status-select" data-market-id="{{ market.id }}" style="width: auto;">
+                        {% for label, status in status_options %}
+                            <option value="{{ status }}" {% if market.status == status %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </td>
                 <td>
                     {% set sorted = market.marketProducts|sort((a, b) => b.score <=> a.score) %}
                     {% for mp in sorted|slice(0, 3) %}
@@ -101,27 +107,7 @@
                     var regex = '^(' + currentPriorities.join('|') + ')$';
                     dt.column(2).search(regex, true, false);
                 }
-                if (currentStatuses.length === 0) {
-                    dt.column(5).search('', false);
-                } else {
-                    var escaped = currentStatuses.map(function(s) {
-                        return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                    });
-                    var statusRegex = '^(' + escaped.join('|') + ')$';
-                    dt.column(5).search(statusRegex, true, false);
-                }
                 dt.draw();
-            }
-
-            function applyPriorityFilter(code) {
-                currentPriorities = allowedFilters[code] || null;
-                document.querySelectorAll('#priority-filter .btn').forEach(function(btn) {
-                    btn.classList.remove('active');
-                });
-                var activeBtn = document.querySelector('#priority-filter .btn[data-filter="' + code + '"]');
-                if (activeBtn) activeBtn.classList.add('active');
-                localStorage.setItem(priorityKey, code);
-                drawTable();
             }
 
             function applyStatusFilter() {
@@ -138,6 +124,27 @@
                     countEl.style.display = currentStatuses.length > 0 ? '' : 'none';
                 }
                 localStorage.setItem(statusKey, JSON.stringify(currentStatuses));
+
+                jQuery('#dataTables tbody tr').each(function() {
+                    var row = jQuery(this);
+                    var select = row.find('.market-status-select');
+                    var status = select.length > 0 ? select.val() : row.data('status');
+                    if (currentStatuses.length === 0 || currentStatuses.indexOf(status) !== -1) {
+                        row.show();
+                    } else {
+                        row.hide();
+                    }
+                });
+            }
+
+            function applyPriorityFilter(code) {
+                currentPriorities = allowedFilters[code] || null;
+                document.querySelectorAll('#priority-filter .btn').forEach(function(btn) {
+                    btn.classList.remove('active');
+                });
+                var activeBtn = document.querySelector('#priority-filter .btn[data-filter="' + code + '"]');
+                if (activeBtn) activeBtn.classList.add('active');
+                localStorage.setItem(priorityKey, code);
                 drawTable();
             }
 
@@ -185,6 +192,35 @@
                 var countEl = document.getElementById('status-filter-count');
                 if (countEl) countEl.style.display = 'none';
             }
+
+            document.querySelectorAll('.market-status-select').forEach(function(select) {
+                select.addEventListener('change', function() {
+                    var marketId = this.getAttribute('data-market-id');
+                    var status = this.value;
+                    var that = this;
+
+                    fetch('/user/market/' + marketId + '/status', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ status: status })
+                    })
+                    .then(function(response) { return response.json(); })
+                    .then(function(data) {
+                        if (data.success) {
+                            that.style.backgroundColor = '#d4edda';
+                            setTimeout(function() {
+                                that.style.backgroundColor = '';
+                            }, 500);
+                            applyStatusFilter();
+                        }
+                    })
+                    .catch(function(error) {
+                        console.error('Error:', error);
+                    });
+                });
+            });
         });
     </script>
 {% endblock %}

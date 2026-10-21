@@ -87,6 +87,54 @@ func TestAmoxtliSearchFailureReturnsStderr(t *testing.T) {
 	}
 }
 
+func TestLimitSearchOutputUnderBudgetUnchanged(t *testing.T) {
+	out := `{"results": [{"source": "file:///cctp.txt", "sections": [{"id": "a", "content": "court"}]}]}`
+	if got := limitSearchOutput(out); got != out {
+		t.Errorf("sortie modifiée sous le budget: %q", got)
+	}
+}
+
+func TestLimitSearchOutputTruncatesHugeSections(t *testing.T) {
+	// Reproduit un tableur converti : une section unique de plusieurs Mo,
+	// suivie d'un document normal.
+	huge := strings.Repeat(`"",`, 1_000_000)
+	payload := map[string]any{"results": []any{
+		map[string]any{"source": "file:///bpu.txt", "sections": []any{map[string]any{"id": "x", "content": huge}}},
+		map[string]any{"source": "file:///cctp.txt", "sections": []any{map[string]any{"id": "y", "content": "Article 1 <délai>"}}},
+	}}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := limitSearchOutput(string(raw))
+
+	if n := len([]rune(got)); n > maxSearchChars+1000 {
+		t.Fatalf("sortie trop longue: %d caractères", n)
+	}
+	var decoded struct {
+		Truncated bool `json:"truncated"`
+		Results   []struct {
+			Source   string `json:"source"`
+			Sections []struct {
+				Content string `json:"content"`
+			} `json:"sections"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(got), &decoded); err != nil {
+		t.Fatalf("la sortie bornée doit rester du JSON valide: %v", err)
+	}
+	if !decoded.Truncated || len(decoded.Results) != 2 {
+		t.Fatalf("truncated=%v, %d résultat(s)", decoded.Truncated, len(decoded.Results))
+	}
+	if c := decoded.Results[0].Sections[0].Content; !strings.HasSuffix(c, truncatedMarker) {
+		t.Errorf("section énorme non signalée comme tronquée: …%q", c[len(c)-20:])
+	}
+	if c := decoded.Results[1].Sections[0].Content; c != "Article 1 <délai>" {
+		t.Errorf("section courte altérée: %q", c)
+	}
+}
+
 func TestListDocuments(t *testing.T) {
 	dir := t.TempDir()
 	bin := writeScript(t, dir, "#!/bin/sh\nprintf '%s' '[\"cctp.pdf\"]'\n")

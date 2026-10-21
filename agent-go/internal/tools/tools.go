@@ -16,7 +16,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bornholm/genai/llm"
 )
@@ -107,7 +109,75 @@ func (t *Tools) amoxtliSearch(ctx context.Context, params map[string]any) (llm.T
 		}
 		return errorResult(err.Error()), nil
 	}
-	return llm.NewToolResult(stdout), nil
+	return llm.NewToolResult(limitSearchOutput(stdout)), nil
+}
+
+// Bornes de la sortie d'amoxtli_search transmise au LLM : une recherche
+// renvoie toutes les sections des documents trouvés, et une section peut
+// contenir un document entier (ex. tableur converti en CSV, plusieurs Mo),
+// ce qui dépasse la fenêtre de contexte du modèle.
+const (
+	maxSearchChars  = 40000
+	maxSectionChars = 4000
+	truncatedMarker = "… [tronqué]"
+)
+
+// limitSearchOutput laisse passer telle quelle une sortie sous le budget.
+// Au-delà, chaque section est coupée à maxSectionChars et les sections sont
+// conservées dans l'ordre de pertinence jusqu'à maxSearchChars au total.
+func limitSearchOutput(out string) string {
+	if utf8.RuneCountInString(out) <= maxSearchChars {
+		return out
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		return truncateRunes(out, maxSearchChars)
+	}
+	results, _ := payload["results"].([]any)
+
+	budget := maxSearchChars
+	kept := make([]any, 0, len(results))
+	for _, r := range results {
+		result, ok := r.(map[string]any)
+		if !ok || budget <= 0 {
+			continue
+		}
+		sections, _ := result["sections"].([]any)
+		keptSections := make([]any, 0, len(sections))
+		for _, s := range sections {
+			section, ok := s.(map[string]any)
+			if !ok || budget <= 0 {
+				continue
+			}
+			content, _ := section["content"].(string)
+			content = truncateRunes(content, min(maxSectionChars, budget))
+			section["content"] = content
+			budget -= utf8.RuneCountInString(content)
+			keptSections = append(keptSections, section)
+		}
+		result["sections"] = keptSections
+		kept = append(kept, result)
+	}
+	payload["results"] = kept
+	payload["truncated"] = true
+
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(payload); err != nil {
+		return truncateRunes(out, maxSearchChars)
+	}
+	return strings.TrimSuffix(buf.String(), "\n")
+}
+
+// truncateRunes coupe s à n caractères (et non octets) en signalant la coupe.
+func truncateRunes(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + truncatedMarker
 }
 
 func (t *Tools) listDocuments(ctx context.Context, params map[string]any) (llm.ToolResult, error) {

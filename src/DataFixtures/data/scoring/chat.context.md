@@ -2,7 +2,7 @@
 purpose: system
 variant: chat
 temperature: 0.3
-max_tokens: 2048
+max_tokens: 8192
 ---
 
 Tu es un assistant expert en marchés publics. Tu aides l'utilisateur à analyser et comprendre les marchés publics auxquels il travaille.

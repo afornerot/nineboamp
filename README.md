@@ -130,6 +130,7 @@ docker compose exec nineboamp grep AiService var/log/dev.log | tail
 | Log : `quota` / HTTP 429 | Quota du fournisseur épuisé (ex. Gemini gratuit : 20 requêtes/jour/modèle) | Changer de modèle ou de fournisseur. L'app réessaie 3 fois puis abandonne |
 | Log : `réponse IA vide ou inattendue` avec `reasoning_content` | Modèle « à raisonnement » à court de tokens | Augmenter `max_tokens` dans l'en-tête du prompt concerné (`src/DataFixtures/data/scoring/*.md`) |
 | `Deadlock` / `SAVEPOINT does not exist` sur `app:init` | Lancé pendant l'init du démarrage | Attendre « START HTTPD » et relancer |
+| Chat ou rapport IA d'un marché avec pièces `.xlsx` qui renvoie des sections tronquées ou une erreur de contexte | Tableur converti avant la correction de la conversion xlsx (des Mo de cellules vides) : le `.txt` existant est réutilisé tel quel | `docker compose exec nineboamp bin/console app:amoxtli:reindex --all` (ou `app:amoxtli:reindex <id>` pour un seul marché) |
 
 ## Fonctionnalités principales
 

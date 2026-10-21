@@ -67,7 +67,9 @@ docker compose up -d --build
 docker compose logs -f nineboamp       # attendre la ligne « START HTTPD »
 ```
 
-Au démarrage, le conteneur attend que MariaDB soit prête, met à jour le schéma, puis lance `app:init`. Cette commande charge les fixtures : compte admin, crons et produits, avec appel à l'IA pour chaque produit (environ une minute).
+Au démarrage, le conteneur attend que MariaDB soit prête, met à jour le schéma, puis lance `app:init`. Si la base ne contient encore aucun compte, cette commande charge les fixtures : compte admin, crons et produits, avec appel à l'IA pour chaque produit (environ une minute). Aux démarrages suivants, elle ne touche à rien.
+
+`app:init --force` recharge les fixtures sur une base existante : les produits et crons supprimés depuis l'interface sont recréés, et les comptes `APP_ADMIN` retrouvent le rôle admin et l'e-mail de `APP_ADMIN_EMAIL`.
 
 > Ne lancez aucune commande `bin/console` avant « START HTTPD ». Un `app:init`
 > lancé en parallèle de celui du démarrage provoque des erreurs
@@ -120,7 +122,7 @@ docker compose exec nineboamp grep AiService var/log/dev.log | tail
 
 | Symptôme | Cause probable | Solution |
 |----------|----------------|----------|
-| Login refusé | Compte créé avec un autre `APP_SECRET`, ou pas créé | Vérifier : `docker compose exec mariadb mariadb -unineboamp -pchangeme nineboamp -e 'SELECT username FROM user'`. Pour recréer le compte avec l'`APP_SECRET` actuel : supprimer la ligne puis `docker compose exec nineboamp bin/console app:init` |
+| Login refusé | Compte créé avec un autre `APP_SECRET`, ou pas créé | Vérifier : `docker compose exec mariadb mariadb -unineboamp -pchangeme nineboamp -e 'SELECT username FROM user'`. Pour recréer le compte avec l'`APP_SECRET` actuel : supprimer la ligne puis `docker compose exec nineboamp bin/console app:init --force` |
 | `Aucun candidat retenu`, mots-clés = noms des produits | L'IA ne répondait pas à la création des produits | Corriger la config IA, puis dans `/user/product` : modifier le produit, **vider** les champs « Mots-clés » et « Secteurs cibles », enregistrer. L'IA les régénère |
 | Recherche qui ramène beaucoup de marchés hors sujet | Mots-clés trop génériques (« gestion », « projet »…) | Les retirer à la main dans `/user/product`. L'IA ne remplace jamais des mots-clés saisis |
 | Log : redirection HTTP 307 vers `/usage` ou une page de login | Mauvaise `AI_BASE_URL` | Pour Xolo : `https://xolo.cadoles.com/api/v1` |

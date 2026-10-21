@@ -8,6 +8,7 @@ use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\Persistence\ManagerRegistry;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Output\NullOutput;
 
@@ -36,6 +37,30 @@ class FixturesTest extends KernelTestCase
         $this->assertNotNull($cron);
         $this->assertSame(Cron::STATUT_DISABLED, $cron->getStatut());
         $this->assertSame(60, $cron->getRepeatinterval());
+    }
+
+    public function testInitSkipsFixturesOnceAccountsExistUnlessForced(): void
+    {
+        try {
+            $kernel = static::bootKernel();
+            $manager = $this->entityManager();
+
+            $application = new Application($kernel);
+            $init = $application->find('app:init');
+            $init->run(new ArrayInput(['--force' => true]), new NullOutput());
+        } catch (\Doctrine\DBAL\Exception) {
+            static::markTestSkipped('Base de données de test indisponible (nécessite la stack Docker).');
+        }
+
+        $crons = $manager->getRepository(Cron::class);
+        $manager->remove($crons->findOneBy(['command' => 'app:bonjour']));
+        $manager->flush();
+
+        $this->assertSame(Command::SUCCESS, $init->run(new ArrayInput([]), new NullOutput()));
+        $this->assertNull($crons->findOneBy(['command' => 'app:bonjour']), 'cron supprimé recréé sans --force');
+
+        $this->assertSame(Command::SUCCESS, $init->run(new ArrayInput(['--force' => true]), new NullOutput()));
+        $this->assertNotNull($crons->findOneBy(['command' => 'app:bonjour']));
     }
 
     private function entityManager(): EntityManagerInterface

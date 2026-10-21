@@ -28,10 +28,8 @@ class InitCommand extends Command
             throw new \LogicException('Symfony Application instance is not available.');
         }
 
-        $io->text('> Chargement des fixtures');
-
         $cmd = $application->find('doctrine:fixtures:load');
-        // $cmd->run(new ArrayInput(['--append' => true, '--no-interaction' => true]), $output);
+        $cmd->run(new ArrayInput(['--append' => true, '--no-interaction' => true]), $output);
 
         $io->text('');
         $io->success('Initialisation terminée');

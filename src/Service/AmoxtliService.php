@@ -10,6 +10,26 @@ use Symfony\Component\Process\Process;
 
 class AmoxtliService
 {
+    /**
+     * Feuille active d'un .xlsx → CSV, sans lignes vides ni cellules vides en
+     * fin de ligne : la mise en forme d'un classeur peut étendre la plage
+     * utilisée à des milliers de cellules vides (ex. 1031 colonnes, 2,8 Mo de
+     * "","",… pour 170 Ko de .xlsx), que la recherche renvoie ensuite au LLM.
+     */
+    private const XLSX_TO_CSV = <<<'PY'
+        import csv, sys
+        import openpyxl
+
+        wb = openpyxl.load_workbook(sys.argv[1])
+        w = csv.writer(sys.stdout, quoting=csv.QUOTE_ALL, lineterminator="\n")
+        for row in wb.active.values:
+            cells = ["" if v is None else v for v in row]
+            while cells and cells[-1] == "":
+                cells.pop()
+            if cells:
+                w.writerow(cells)
+        PY;
+
     private string $projectDir;
     private string $binaryPath = '/usr/local/bin/amoxtli';
 
@@ -197,7 +217,7 @@ class AmoxtliService
 
             $process = new Process([
                 'python3', '-c',
-                'import openpyxl, csv, sys; wb = openpyxl.load_workbook(sys.argv[1]); ws = wb.active; w = csv.writer(sys.stdout, quoting=csv.QUOTE_ALL, lineterminator="\n"); [w.writerow(row) for row in ws.values]',
+                self::XLSX_TO_CSV,
                 $xlsxFile,
             ]);
             $process->setTimeout(30);

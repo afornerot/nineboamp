@@ -122,9 +122,13 @@ const (
 	truncatedMarker = "… [tronqué]"
 )
 
+var markerLen = utf8.RuneCountInString(truncatedMarker)
+
 // limitSearchOutput laisse passer telle quelle une sortie sous le budget.
-// Au-delà, chaque section est coupée à maxSectionChars et les sections sont
-// conservées dans l'ordre de pertinence jusqu'à maxSearchChars au total.
+// Au-delà, chaque section est coupée à maxSectionChars, puis résultats et
+// sections sont conservés dans l'ordre de pertinence tant que le JSON
+// réencodé (clés, ids et échappement compris) tient dans maxSearchChars.
+// "truncated" n'est ajouté que si un contenu a été coupé ou écarté.
 func limitSearchOutput(out string) string {
 	if utf8.RuneCountInString(out) <= maxSearchChars {
 		return out
@@ -136,48 +140,111 @@ func limitSearchOutput(out string) string {
 	}
 	results, _ := payload["results"].([]any)
 
-	budget := maxSearchChars
+	payload["results"] = []any{}
+	payload["truncated"] = true
+	budget := maxSearchChars - encodedLen(payload)
+	cut := false
+
 	kept := make([]any, 0, len(results))
 	for _, r := range results {
 		result, ok := r.(map[string]any)
-		if !ok || budget <= 0 {
+		if !ok {
+			cut = true
 			continue
 		}
 		sections, _ := result["sections"].([]any)
+		if sections != nil {
+			result["sections"] = []any{}
+		}
+		cost := encodedLen(result) + 1 // +1 : virgule entre éléments
+		if cost > budget {
+			cut = true
+			continue
+		}
+		budget -= cost
+
 		keptSections := make([]any, 0, len(sections))
 		for _, s := range sections {
 			section, ok := s.(map[string]any)
-			if !ok || budget <= 0 {
+			if !ok {
+				cut = true
 				continue
 			}
-			content, _ := section["content"].(string)
-			content = truncateRunes(content, min(maxSectionChars, budget))
-			section["content"] = content
-			budget -= utf8.RuneCountInString(content)
+			original, _ := section["content"].(string)
+			cost := fitSection(section, budget)
+			if cost == 0 {
+				cut = true
+				continue
+			}
+			if section["content"] != original {
+				cut = true
+			}
+			budget -= cost
 			keptSections = append(keptSections, section)
 		}
-		result["sections"] = keptSections
+		if sections != nil {
+			result["sections"] = keptSections
+		}
 		kept = append(kept, result)
 	}
 	payload["results"] = kept
-	payload["truncated"] = true
+	if !cut {
+		delete(payload, "truncated")
+	}
 
+	encoded, err := encodeJSON(payload)
+	if err != nil {
+		return truncateRunes(out, maxSearchChars)
+	}
+	return encoded
+}
+
+// fitSection tronque le contenu de section pour que son encodage JSON tienne
+// dans budget, et renvoie ce coût (0 si la section ne tient pas du tout).
+func fitSection(section map[string]any, budget int) int {
+	content, _ := section["content"].(string)
+	content = truncateRunes(content, maxSectionChars)
+	for {
+		section["content"] = content
+		cost := encodedLen(section) + 1
+		if cost <= budget {
+			return cost
+		}
+		// Chaque caractère retiré réduit l'encodage d'au moins un caractère.
+		n := utf8.RuneCountInString(content) - (cost - budget)
+		if n <= markerLen {
+			return 0
+		}
+		content = truncateRunes(content, n)
+	}
+}
+
+func encodeJSON(v any) (string, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
-	if err := enc.Encode(payload); err != nil {
-		return truncateRunes(out, maxSearchChars)
+	if err := enc.Encode(v); err != nil {
+		return "", err
 	}
-	return strings.TrimSuffix(buf.String(), "\n")
+	return strings.TrimSuffix(buf.String(), "\n"), nil
 }
 
-// truncateRunes coupe s à n caractères (et non octets) en signalant la coupe.
+func encodedLen(v any) int {
+	encoded, err := encodeJSON(v)
+	if err != nil {
+		return maxSearchChars + 1
+	}
+	return utf8.RuneCountInString(encoded)
+}
+
+// truncateRunes coupe s à n caractères (et non octets), marqueur de coupe
+// compris.
 func truncateRunes(s string, n int) string {
 	runes := []rune(s)
 	if len(runes) <= n {
 		return s
 	}
-	return string(runes[:n]) + truncatedMarker
+	return string(runes[:max(n-markerLen, 0)]) + truncatedMarker
 }
 
 func (t *Tools) listDocuments(ctx context.Context, params map[string]any) (llm.ToolResult, error) {

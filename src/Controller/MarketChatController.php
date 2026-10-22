@@ -2,6 +2,7 @@
 
 namespace App\Controller;
 
+use App\Controller\Trait\AgentJobPollTrait;
 use App\Entity\Market;
 use App\Entity\MarketChatMessage;
 use App\Repository\MarketChatMessageRepository;
@@ -21,6 +22,8 @@ use Symfony\Component\Routing\Attribute\Route;
 
 class MarketChatController extends AbstractController
 {
+    use AgentJobPollTrait;
+
     public function __construct(
         private EntityManagerInterface $em,
         private MarketChatMessageRepository $chatRepo,
@@ -116,17 +119,9 @@ class MarketChatController extends AbstractController
             return new JsonResponse(['status' => 'error', 'error' => 'Agent non disponible'], 500);
         }
 
-        $result = $this->agentService->getResult($jobId);
+        $job = $this->agentService->getResult($jobId);
 
-        if ('not_found' === $result['status']) {
-            return new JsonResponse(['status' => 'not_found', 'error' => 'Job non trouvé']);
-        }
-
-        if ('pending' === $result['status']) {
-            return new JsonResponse(['status' => 'pending']);
-        }
-
-        if ('done' === $result['status']) {
+        if ($job->isDone()) {
             $market = $this->marketRepo->find($id);
             if (!$market) {
                 return new JsonResponse(['status' => 'error', 'error' => 'Marché introuvable'], 404);
@@ -135,21 +130,21 @@ class MarketChatController extends AbstractController
             $assistantMessage = new MarketChatMessage();
             $assistantMessage->setMarket($market);
             $assistantMessage->setRole('assistant');
-            $assistantMessage->setContent($result['result']['answer'] ?? '');
-            $assistantMessage->setSources($result['result']['sources'] ?? []);
-            $assistantMessage->setDebugData(['agent' => true, 'tools_used' => $result['result']['tools_used'] ?? []]);
+            $assistantMessage->setContent($job->result['answer'] ?? '');
+            $assistantMessage->setSources($job->result['sources'] ?? []);
+            $assistantMessage->setDebugData(['agent' => true, 'tools_used' => $job->result['tools_used'] ?? []]);
             $this->em->persist($assistantMessage);
             $this->em->flush();
 
             return new JsonResponse([
                 'status' => 'done',
                 'assistantMessageId' => $assistantMessage->getId(),
-                'result' => $result['result'],
+                'result' => $job->result,
                 'important' => $assistantMessage->isImportant(),
             ]);
         }
 
-        return new JsonResponse(['status' => 'error', 'error' => 'Statut inconnu'], 500);
+        return $this->agentJobResponse($job);
     }
 
     #[Route('/user/market/{id}/chat/save', name: 'app_market_chat_save', methods: ['POST'])]

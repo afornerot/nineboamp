@@ -456,18 +456,18 @@ class BoampFinderService
         $jobId = $started['job_id'];
         $job = $this->scoringAgent->waitForResult($jobId, $started['timeout']);
 
-        if ('done' !== $job['status']) {
+        if (!$job->isDone()) {
             // Le LLM a répondu, mais de façon inexploitable : « IA non exploitable ».
-            if ('parse' === ($job['code'] ?? null)) {
+            if ('parse' === $job->code()) {
                 $this->logger->warning('BoampFinderService: réponse IA non exploitable', ['idweb' => $market->getIdweb(), 'job_id' => $jobId]);
 
                 return null;
             }
 
             // API en échec, délai dépassé, job perdu : l'appelant l'affiche avec sa raison.
-            throw new \RuntimeException(sprintf('%s (job %s)', $job['error'], $jobId));
+            throw new \RuntimeException(sprintf('%s (job %s)', $job->error, $jobId));
         }
-        $result = $job['result'];
+        $result = $job->result;
 
         $market->setDescription($description);
         $market->setDeadline($deadlineRaw ? new \DateTime($deadlineRaw) : null);

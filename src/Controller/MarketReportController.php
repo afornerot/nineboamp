@@ -2,6 +2,7 @@
 
 namespace App\Controller;
 
+use App\Controller\Trait\AgentJobPollTrait;
 use App\Entity\Market;
 use App\Entity\MarketReport;
 use App\Repository\MarketReportRepository;
@@ -17,6 +18,8 @@ use Symfony\Component\Routing\Attribute\Route;
 
 class MarketReportController extends AbstractController
 {
+    use AgentJobPollTrait;
+
     public function __construct(
         private EntityManagerInterface $em,
         private MarketRepository $marketRepo,
@@ -71,24 +74,18 @@ class MarketReportController extends AbstractController
             return new JsonResponse(['error' => 'Job ID manquant'], 500);
         }
 
-        $result = $this->reportService->getResult($jobId);
-        $status = $result['status'] ?? 'unknown';
-        $payload = $result['result'] ?? [];
+        $job = $this->reportService->getResult($jobId);
+
+        // Pas encore de statut final : le rapport reste en attente.
+        if (!$job->isFinal()) {
+            return $this->agentJobResponse($job);
+        }
 
         $now = new \DateTime();
         $now->setTimezone(new \DateTimeZone('Europe/Paris'));
 
-        if ('done' === $status) {
-            $markdown = $payload['markdown'] ?? '';
-            if ('' === $markdown) {
-                $report->setStatus(MarketReport::STATUS_ERROR);
-                $report->setErrorMessage('Réponse vide de l\'agent');
-                $report->setUpdatedAt($now);
-                $this->em->flush();
-
-                return new JsonResponse(['status' => 'error', 'error' => 'Réponse vide']);
-            }
-
+        $markdown = $job->result['markdown'] ?? '';
+        if ($job->isDone() && '' !== $markdown) {
             $report->setMarkdownContent($markdown);
             $report->setStatus(MarketReport::STATUS_DONE);
             $report->setUpdatedAt($now);
@@ -101,19 +98,13 @@ class MarketReportController extends AbstractController
             ]);
         }
 
-        if ('error' === $status || 'not_found' === $status) {
-            $report->setStatus(MarketReport::STATUS_ERROR);
-            $report->setErrorMessage($payload['error'] ?? 'Erreur inconnue');
-            $report->setUpdatedAt($now);
-            $this->em->flush();
+        $error = $job->isDone() ? 'Réponse vide de l\'agent' : $job->error;
+        $report->setStatus(MarketReport::STATUS_ERROR);
+        $report->setErrorMessage($error);
+        $report->setUpdatedAt($now);
+        $this->em->flush();
 
-            return new JsonResponse([
-                'status' => 'error',
-                'error' => $payload['error'] ?? 'Erreur inconnue',
-            ]);
-        }
-
-        return new JsonResponse(['status' => 'pending']);
+        return new JsonResponse(['status' => 'error', 'error' => $error]);
     }
 
     #[Route('/user/market/{id}/report/pdf', name: 'app_market_report_pdf', methods: ['GET'])]

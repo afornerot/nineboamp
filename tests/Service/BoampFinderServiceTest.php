@@ -79,12 +79,12 @@ class BoampFinderServiceTest extends TestCase
         $method->setAccessible(true);
 
         $market = (new Market())->setIdweb('26-12345')->setTitle('Audit des systèmes d\'information');
+        (new \ReflectionProperty(Market::class, 'id'))->setValue($market, 1);
 
         $reflectionProp = new \ReflectionClass($service);
         $emProp = $reflectionProp->getProperty('em');
         $emProp->setAccessible(true);
         $mockEm = $this->createMock(EntityManagerInterface::class);
-        $mockEm->method('flush')->willReturn(null);
         $emProp->setValue($service, $mockEm);
 
         $reflectionProp = new \ReflectionClass($service);
@@ -92,11 +92,11 @@ class BoampFinderServiceTest extends TestCase
         $scoringProp->setAccessible(true);
         $mockScoring = $this->createMock(\App\Service\ScoringAgentService::class);
         $mockScoring->method('startScoringJob')->willReturn('test-job-id');
-        $mockScoring->method('waitForResult')->willReturn([
+        $mockScoring->method('waitForResult')->willReturn(['status' => 'done', 'result' => [
             'score' => 75,
             'priority' => 'B',
             'products' => [['name' => 'Planigram', 'score' => 75, 'relevance' => 'Bonne correspondance']],
-        ]);
+        ]]);
         $scoringProp->setValue($service, $mockScoring);
 
         $result = $method->invoke($service, $market, $details, [$product]);

@@ -175,7 +175,7 @@ class BoampFinderService
                         'idweb' => $idweb,
                         'error' => $e->getMessage(),
                     ]);
-                    $progress?->setMessage(sprintf('<error>%s — scoring KO</error>', $idweb));
+                    $progress?->setMessage(sprintf('<error>%s — scoring KO : %s</error>', $idweb, $e->getMessage()));
                     $progress?->advance();
                     sleep(2);
                     continue;
@@ -452,18 +452,20 @@ class BoampFinderService
         );
 
         if (null === $jobId) {
-            $this->logger->warning('BoampFinderService: failed to start scoring job', ['idweb' => $market->getIdweb()]);
-
-            return null;
+            throw new \RuntimeException('job de scoring non démarré, agent injoignable');
         }
 
-        $result = $this->scoringAgent->waitForResult($jobId);
+        $job = $this->scoringAgent->waitForResult($jobId);
 
-        if (null === $result) {
-            $this->logger->warning('BoampFinderService: scoring job timeout or error', ['idweb' => $market->getIdweb(), 'job_id' => $jobId]);
-
+        // Erreur rendue par l'agent (réponse LLM inexploitable, API en échec) : « IA non exploitable ».
+        // Délai dépassé ou job perdu : le scoring n'a pas abouti, l'appelant l'affiche avec sa raison.
+        if ('error' === $job['status']) {
             return null;
         }
+        if ('done' !== $job['status']) {
+            throw new \RuntimeException(sprintf('%s (job %s)', $job['error'], $jobId));
+        }
+        $result = $job['result'];
 
         $market->setDescription($description);
         $market->setDeadline($deadlineRaw ? new \DateTime($deadlineRaw) : null);

@@ -159,6 +159,24 @@ Le service applique automatiquement :
 Si un appel LLM échoue après les retries, `AiService::ask()` retourne `''` et
 un log d'erreur est émis (`var/log/dev.log` → `app.ERROR: AiService: ...`).
 
+### Délais du scoring (agent Go)
+
+Le scoring d'un marché fait au plus deux appels LLM côté agent :
+
+1. appel structuré (schéma JSON imposé), borné par `-score-structured-timeout`
+   (45 s par défaut) ;
+2. en cas d'échec, repli sur un appel texte, borné par `-call-timeout` (120 s).
+
+`ScoringAgentService::waitForResult()` attend le résultat au plus
+`RESULT_TIMEOUT` (180 s), soit plus que ce pire cas. Si l'un de ces délais
+change, garder `RESULT_TIMEOUT` > `score-structured-timeout` + `call-timeout`,
+sinon PHP abandonne des jobs que l'agent termine ensuite.
+
+Un échec rendu par l'agent (réponse non parsable, API en erreur) arrête
+l'attente aussitôt et compte en « Réponse IA non exploitable ». Un délai dépassé
+ou un job introuvable compte en « Scoring KO », avec la raison dans la barre de
+progression et dans les logs.
+
 ## Dépannage
 
 | Symptôme | Cause probable | Action |
@@ -166,3 +184,5 @@ un log d'erreur est émis (`var/log/dev.log` → `app.ERROR: AiService: ...`).
 | "Erreur de connexion" dans le chat | Agent non démarré ou timeout | Vérifier que le container est UP et que l'agent écoute sur `:8000` (`docker logs nineboamp`) |
 | LLM répond avec les placeholders `{{...}}` non remplacés | Prompts non à jour | L'agent charge les prompts au démarrage ; redémarrer le container |
 | Rate limit dépassé | Trop de requêtes simultanées | Patienter ou ajuster `AI_MODEL` / `AI_BASE_URL` |
+| `scoring : échec de l'appel structuré, repli sur l'appel texte` dans les logs de l'agent | Le provider ne répond pas, ou mal, en mode JSON structuré | Sans gravité si le repli aboutit. Si c'est systématique, chaque scoring perd `-score-structured-timeout` : baisser ce délai |
+| `scoring KO : pas de résultat de l'agent après 180 s` | Les deux appels LLM ont été très lents | Durées réelles : `docker compose logs nineboamp \| grep 'kind=score'` |

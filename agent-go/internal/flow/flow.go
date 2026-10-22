@@ -5,6 +5,7 @@ package flow
 
 import (
 	"context"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -93,6 +94,10 @@ type Config struct {
 	MaxIterations     int
 	CallTimeout       time.Duration
 	ReportCallTimeout time.Duration
+	// ScoreStructuredTimeout borne la tentative structurée du scoring : au-delà,
+	// on bascule sur l'appel texte (CallTimeout) plutôt que d'attendre en vain.
+	ScoreStructuredTimeout time.Duration
+	Logger                 *slog.Logger
 }
 
 // Service exécute les workflows de l'agent.
@@ -113,6 +118,12 @@ func New(client llm.ChatCompletionClient, p *prompts.Prompts, tools []llm.Tool, 
 	}
 	if cfg.ReportCallTimeout <= 0 {
 		cfg.ReportCallTimeout = 180 * time.Second
+	}
+	if cfg.ScoreStructuredTimeout <= 0 {
+		cfg.ScoreStructuredTimeout = 45 * time.Second
+	}
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
 	}
 	return &Service{client: client, prompts: p, tools: tools, cfg: cfg}
 }

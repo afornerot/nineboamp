@@ -9,6 +9,10 @@ class ScoringAgentService
 {
     private const AGENT_URL = 'http://127.0.0.1:8000';
 
+    // Doit couvrir le pire cas d'un job de scoring côté agent (cmd/nineagent) :
+    // -score-structured-timeout (45 s) puis le repli texte -call-timeout (120 s).
+    public const RESULT_TIMEOUT = 180;
+
     public function __construct(
         private \Symfony\Contracts\HttpClient\HttpClientInterface $httpClient,
         private \Psr\Log\LoggerInterface $logger,
@@ -64,11 +68,7 @@ class ScoringAgentService
     public function getScoringResult(string $jobId): array
     {
         try {
-            $response = $this->httpClient->request('GET', self::AGENT_URL . '/score/result/' . $jobId, [
-                'timeout' => 10,
-            ]);
-
-            return $response->toArray();
+            return $this->fetchJob($jobId);
         } catch (\Throwable $e) {
             $this->logger->warning('ScoringAgentService: failed to get scoring result', [
                 'error' => $e->getMessage(),
@@ -98,28 +98,65 @@ class ScoringAgentService
     /**
      * Wait synchronously for scoring result.
      *
-     * @return array|null Result data or null on failure/timeout
+     * @return array{status: 'done', result: array}|array{status: 'error'|'not_found'|'timeout', error: string}
      */
-    public function waitForResult(string $jobId, int $maxRetries = 30, int $delaySeconds = 2): ?array
+    public function waitForResult(string $jobId, int $timeoutSeconds = self::RESULT_TIMEOUT, int $delaySeconds = 2): array
     {
-        for ($i = 0; $i < $maxRetries; ++$i) {
-            $result = $this->getScoringResult($jobId);
+        $deadline = time() + $timeoutSeconds;
 
-            if ('not_found' === $result['status']) {
-                $this->logger->warning('ScoringAgentService: job not found', ['job_id' => $jobId]);
-
-                return null;
+        do {
+            try {
+                $job = $this->fetchJob($jobId);
+            } catch (\Throwable $e) {
+                // Agent momentanément injoignable : le job continue peut-être, on réessaie.
+                $this->logger->warning('ScoringAgentService: failed to get scoring result', [
+                    'error' => $e->getMessage(),
+                    'job_id' => $jobId,
+                ]);
+                sleep($delaySeconds);
+                continue;
             }
 
-            if ('done' === $result['status']) {
-                return $result['result'] ?? null;
+            $status = $job['status'] ?? null;
+
+            if ('done' === $status && is_array($job['result'] ?? null)) {
+                return ['status' => 'done', 'result' => $job['result']];
+            }
+
+            if ('error' === $status || 'done' === $status) {
+                $error = $job['result']['error'] ?? 'réponse vide de l\'agent';
+                $this->logger->warning('ScoringAgentService: scoring job failed', [
+                    'job_id' => $jobId,
+                    'error' => $error,
+                    'raw_response' => $job['result']['raw_response'] ?? null,
+                ]);
+
+                return ['status' => 'error', 'error' => $error];
+            }
+
+            if ('not_found' === $status) {
+                $this->logger->warning('ScoringAgentService: job not found', ['job_id' => $jobId]);
+
+                return ['status' => 'not_found', 'error' => 'job introuvable côté agent'];
             }
 
             sleep($delaySeconds);
-        }
+        } while (time() < $deadline);
 
-        $this->logger->warning('ScoringAgentService: timeout waiting for result', ['job_id' => $jobId, 'max_retries' => $maxRetries]);
+        $this->logger->warning('ScoringAgentService: timeout waiting for result', ['job_id' => $jobId, 'timeout' => $timeoutSeconds]);
 
-        return null;
+        return ['status' => 'timeout', 'error' => sprintf('pas de résultat de l\'agent après %d s', $timeoutSeconds)];
+    }
+
+    /**
+     * @return array{status: string, result?: mixed}
+     */
+    private function fetchJob(string $jobId): array
+    {
+        $response = $this->httpClient->request('GET', self::AGENT_URL . '/score/result/' . $jobId, [
+            'timeout' => 10,
+        ]);
+
+        return $response->toArray();
     }
 }

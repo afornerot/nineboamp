@@ -372,3 +372,44 @@ func TestCompleteUsesCallTimeout(t *testing.T) {
 		t.Errorf("complete: %v", err)
 	}
 }
+
+// hangingStructuredClient reste bloqué sur l'appel structuré jusqu'à l'expiration
+// de son contexte, comme un provider qui ne répond pas en mode response_format.
+type hangingStructuredClient struct {
+	fakeClient
+}
+
+func (c *hangingStructuredClient) ChatCompletion(ctx context.Context, opts ...llm.ChatCompletionOptionFunc) (llm.ChatCompletionResponse, error) {
+	if llm.NewChatCompletionOptions(opts...).ResponseFormat != llm.ResponseFormatDefault {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return c.fakeClient.ChatCompletion(ctx, opts...)
+}
+
+func TestScoreStructuredTimeoutFallsBackQuickly(t *testing.T) {
+	client := &hangingStructuredClient{fakeClient{queue: []fakeCall{
+		assistant(`{"score": 55, "priority": "C", "explanation": "OK", "products": []}`),
+	}}}
+	svc := New(client, testPrompts(t), nil, Config{
+		CallTimeout:            5 * time.Second,
+		ScoreStructuredTimeout: 20 * time.Millisecond,
+	})
+
+	start := time.Now()
+	status, result := svc.Score(context.Background(), ScoreRequest{})
+
+	if status != StatusDone || result.(ScoreSuccess).Score != 55 {
+		t.Fatalf("status = %q, result = %+v", status, result)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("repli après %s : la tentative structurée doit être bornée par ScoreStructuredTimeout, pas CallTimeout", elapsed)
+	}
+}
+
+func TestScoreStructuredTimeoutDefault(t *testing.T) {
+	svc := newService(t, &fakeClient{}, nil, Config{})
+	if svc.cfg.ScoreStructuredTimeout != 45*time.Second {
+		t.Errorf("ScoreStructuredTimeout par défaut = %s", svc.cfg.ScoreStructuredTimeout)
+	}
+}

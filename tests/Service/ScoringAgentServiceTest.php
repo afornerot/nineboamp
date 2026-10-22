@@ -96,4 +96,33 @@ class ScoringAgentServiceTest extends TestCase
 
         $this->assertSame(['job_id' => 'job-1', 'timeout' => 165], $started);
     }
+
+    public function testStartScoringJobRefusedKeepsTheAgentReason(): void
+    {
+        $client = new MockHttpClient([new MockResponse('{"error":"impossible de créer le job"}', ['http_code' => 500])]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('job de scoring refusé par l\'agent (HTTP 500) : impossible de créer le job');
+
+        (new ScoringAgentService($client, new NullLogger()))->startScoringJob(1, 't', 'b', 'd', '1000', null, []);
+    }
+
+    public function testStartScoringJobUnreachableAgent(): void
+    {
+        $client = new MockHttpClient([new MockResponse('', ['error' => 'Connection refused'])]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('job de scoring non démarré : Connection refused');
+
+        (new ScoringAgentService($client, new NullLogger()))->startScoringJob(1, 't', 'b', 'd', '1000', null, []);
+    }
+
+    public function testFailedPollIsNotAJobError(): void
+    {
+        $client = new MockHttpClient([new MockResponse('', ['http_code' => 502])]);
+
+        $result = (new ScoringAgentService($client, new NullLogger()))->getScoringResult('job-1');
+
+        $this->assertSame('unreachable', $result['status']);
+    }
 }

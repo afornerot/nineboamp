@@ -25,7 +25,9 @@ class ScoringAgentService
     /**
      * Start a scoring job.
      *
-     * @return array{job_id: string, timeout: int}|null Job ID et délai (s) au bout duquel l'agent garantit un statut final, null on error
+     * @return array{job_id: string, timeout: int} Job ID et délai (s) au bout duquel l'agent garantit un statut final
+     *
+     * @throws \RuntimeException si le job n'a pas été créé, avec la raison (agent injoignable, job refusé…)
      */
     public function startScoringJob(
         int $marketId,
@@ -35,7 +37,7 @@ class ScoringAgentService
         string $amount,
         ?string $deadline,
         array $products
-    ): ?array {
+    ): array {
         try {
             $response = $this->httpClient->request('POST', self::AGENT_URL . '/score', [
                 'json' => [
@@ -50,24 +52,38 @@ class ScoringAgentService
                 'timeout' => 10,
             ]);
 
-            $data = $response->toArray();
-            if (!isset($data['job_id'])) {
-                return null;
-            }
-
-            return ['job_id' => $data['job_id'], 'timeout' => (int) ($data['timeout'] ?? self::DEFAULT_AGENT_TIMEOUT)];
+            // false : un code HTTP d'erreur ne lève pas, on veut le message de l'agent.
+            $data = $response->toArray(false);
         } catch (\Throwable $e) {
-            $this->logger->error('ScoringAgentService: failed to start scoring job', [
-                'error' => $e->getMessage(),
-                'market_id' => $marketId,
-            ]);
-
-            return null;
+            // Agent injoignable, réponse non JSON, requête impossible à encoder…
+            throw $this->startFailed($marketId, 'job de scoring non démarré : ' . $e->getMessage(), $e);
         }
+
+        if (!isset($data['job_id'])) {
+            // Agent joint, mais il a refusé le job (500 « impossible de créer le job », 422…).
+            $reason = $data['error'] ?? $data['detail'][0]['msg'] ?? 'réponse sans job_id';
+
+            throw $this->startFailed($marketId, sprintf('job de scoring refusé par l\'agent (HTTP %d) : %s', $response->getStatusCode(), $reason));
+        }
+
+        return ['job_id' => $data['job_id'], 'timeout' => (int) ($data['timeout'] ?? self::DEFAULT_AGENT_TIMEOUT)];
+    }
+
+    private function startFailed(int $marketId, string $message, ?\Throwable $previous = null): \RuntimeException
+    {
+        $this->logger->error('ScoringAgentService: failed to start scoring job', [
+            'error' => $message,
+            'market_id' => $marketId,
+        ]);
+
+        return new \RuntimeException($message, 0, $previous);
     }
 
     /**
      * Get scoring result (single check, no polling).
+     *
+     * Statut 'unreachable' : c'est le poll qui a échoué (agent momentanément injoignable),
+     * pas le job, qui continue peut-être ; à distinguer d'un 'error' rendu par l'agent.
      *
      * @return array<string, mixed>
      */
@@ -81,7 +97,7 @@ class ScoringAgentService
                 'job_id' => $jobId,
             ]);
 
-            return ['status' => 'error', 'result' => ['error' => $e->getMessage()]];
+            return ['status' => 'unreachable', 'error' => $e->getMessage()];
         }
     }
 

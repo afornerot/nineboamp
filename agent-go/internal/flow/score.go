@@ -29,8 +29,10 @@ func (s *Service) Score(ctx context.Context, req ScoreRequest) (status string, r
 	start := time.Now()
 	res, err := s.complete(ctx, s.cfg.ScoreStructuredTimeout, messages, nil, llm.WithJSONResponse(scoreResponseSchema()))
 	if err != nil {
+		// err.Error() : le TextHandler formate une erreur avec %+v, ce qui
+		// déroulerait les piles pkg/errors que genai attache à ses erreurs.
 		s.cfg.Logger.Warn("scoring : échec de l'appel structuré, repli sur l'appel texte",
-			"market_id", req.MarketID, "duration", time.Since(start).Round(time.Millisecond), "error", err)
+			"market_id", req.MarketID, "duration", time.Since(start).Round(time.Millisecond), "error", err.Error())
 		// 2. Repli : appel texte simple, comme l'agent Python.
 		res, err = s.complete(ctx, s.cfg.CallTimeout, messages, nil)
 		if err != nil {

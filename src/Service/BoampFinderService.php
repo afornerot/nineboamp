@@ -23,6 +23,7 @@ class BoampFinderService
     private const MAX_KEYWORDS = 50;
     private const PAGE_SIZE = 100;
     private const MAX_RESULTS = 1000;
+    private const MAX_REASON_WIDTH = 200;
 
     // La recherche BOAMP porte sur des mots entiers : un acronyme ne trouve pas sa forme développée.
     private const KEYWORD_EXPANSIONS = [
@@ -176,7 +177,7 @@ class BoampFinderService
                         'idweb' => $idweb,
                         'error' => $e->getMessage(),
                     ]);
-                    $progress?->setMessage(sprintf('<error>%s — scoring KO : %s</error>', $idweb, OutputFormatter::escape($e->getMessage())));
+                    $progress?->setMessage(sprintf('<error>%s — scoring KO : %s</error>', $idweb, OutputFormatter::escape($this->shortReason($e->getMessage()))));
                     $progress?->advance();
                     sleep(2);
                     continue;
@@ -405,6 +406,16 @@ class BoampFinderService
     }
 
     /**
+     * Raison d'échec tenant sur une ligne de la barre de progression : une erreur de
+     * l'agent embarque parfois le corps HTTP complet (JSON, page HTML). Le message
+     * entier reste dans le log.
+     */
+    private function shortReason(string $message): string
+    {
+        return mb_strimwidth(trim(preg_replace('/\s+/', ' ', $message) ?? ''), 0, self::MAX_REASON_WIDTH, '…');
+    }
+
+    /**
      * @param Product[] $products
      *
      * @return array{Market, MarketProduct[]}|null
@@ -442,6 +453,7 @@ class BoampFinderService
         $this->em->flush();
         $marketId = $market->getId();
 
+        // Lève avec sa raison si l'agent n'a pas créé le job : l'appelant l'affiche.
         $started = $this->scoringAgent->startScoringJob(
             $marketId,
             $title ?? '',
@@ -451,10 +463,6 @@ class BoampFinderService
             $deadlineRaw,
             $productsData
         );
-
-        if (null === $started) {
-            throw new \RuntimeException('job de scoring non démarré, agent injoignable');
-        }
 
         $jobId = $started['job_id'];
         $job = $this->scoringAgent->waitForResult($jobId, $started['timeout']);

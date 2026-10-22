@@ -83,6 +83,16 @@ class BoampFinderServiceTest extends TestCase
         $this->scoreAndQualifyWith(['status' => 'error', 'error' => 'Erreur de connexion à l\'API: context deadline exceeded', 'code' => null]);
     }
 
+    public function testShortReasonFitsOnOneLine(): void
+    {
+        $reason = $this->callPrivate($this->buildService(), 'shortReason', "Erreur de connexion à l'API: rate limit\nhttp 429: " . str_repeat('x', 500));
+
+        $this->assertStringNotContainsString("\n", $reason);
+        $this->assertStringStartsWith("Erreur de connexion à l'API: rate limit http 429: ", $reason);
+        $this->assertStringEndsWith('…', $reason);
+        $this->assertSame(200, mb_strwidth($reason));
+    }
+
     public function testRunSkipsAlreadyScoredMarketsBeforeFillingSlots(): void
     {
         $productRepository = $this->createMock(ProductRepository::class);

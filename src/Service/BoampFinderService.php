@@ -424,18 +424,7 @@ class BoampFinderService
     {
         $title = $market->getTitle();
         $buyer = $market->getBuyer() ?? 'Information non disponible';
-        $donnees = $this->parseDonnees($details);
-        $description = $donnees['FNSimple']['initial']['natureMarche']['description']
-            ?? $donnees['EFORMS']['ContractNotice']['cac:ProcurementProject']['cbc:Description']['#text']
-            ?? $donnees['OBJET']['OBJET_COMPLET']
-            ?? $donnees['OBJET']['description']
-            ?? '';
-        if ('' === trim($description)) {
-            $description = $this->stringifyValue($details['descripteur_libelle'] ?? '');
-        }
-        if ('' === trim($description)) {
-            $description = $this->stringifyValue($details['objet'] ?? '');
-        }
+        $description = $this->extractDescription($details);
         $deadlineRaw = $details['datelimitereponse'] ?? null;
         $amount = $this->formatAmount($details);
         $url = $market->getUrl() ?? "https://www.boamp.fr/pages/avis/?q=idweb:{$market->getIdweb()}";
@@ -749,6 +738,36 @@ class BoampFinderService
     }
 
     /**
+     * Description d'un avis BOAMP selon son schéma (FNSimple, eForms, MAPA, ancien
+     * format) ; à défaut ses descripteurs, puis son objet.
+     *
+     * @param array<string, mixed> $details
+     */
+    public function extractDescription(array $details): string
+    {
+        $donnees = $this->parseDonnees($details);
+        $candidates = [
+            $donnees['FNSimple']['initial']['natureMarche']['description'] ?? null,
+            $donnees['EFORMS']['ContractNotice']['cac:ProcurementProject']['cbc:Description']['#text'] ?? null,
+            $donnees['MAPA']['initial']['caracteristiques']['principales'] ?? null,
+            $donnees['MAPA']['initial']['description']['objet'] ?? null,
+            $donnees['OBJET']['OBJET_COMPLET'] ?? null,
+            $donnees['OBJET']['description'] ?? null,
+            $details['descripteur_libelle'] ?? null,
+            $details['objet'] ?? null,
+        ];
+
+        foreach ($candidates as $candidate) {
+            $description = $this->stringifyValue($candidate);
+            if ('' !== trim($description)) {
+                return $description;
+            }
+        }
+
+        return '';
+    }
+
+    /**
      * Parse le champ donnees (JSON string) retourné par l'API BOAMP.
      *
      * @return array<string, mixed>
@@ -830,7 +849,8 @@ class BoampFinderService
     /**
      * Convertit une valeur arbitraire (string, array, object, null) en string.
      * Utilisé pour les champs de l'API BOAMP qui peuvent renvoyer des structures
-     * imbriquées au lieu d'un libellé simple (ex. descripteur_libelle).
+     * imbriquées au lieu d'un libellé simple. Une liste de libellés (ex.
+     * descripteur_libelle) est jointe par des virgules plutôt qu'encodée en JSON.
      */
     private function stringifyValue(mixed $value): string
     {
@@ -839,6 +859,9 @@ class BoampFinderService
         }
         if (null === $value) {
             return '';
+        }
+        if (is_array($value) && array_is_list($value) && $value === array_filter($value, 'is_scalar')) {
+            return implode(', ', $value);
         }
         if (is_array($value) || is_object($value)) {
             $encoded = json_encode($value, \JSON_UNESCAPED_UNICODE | \JSON_UNESCAPED_SLASHES);

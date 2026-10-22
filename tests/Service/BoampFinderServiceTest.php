@@ -43,6 +43,59 @@ class BoampFinderServiceTest extends TestCase
         $this->assertStringContainsString('Services', $result);
     }
 
+    public function testStringifyValueJoinsListOfLabels(): void
+    {
+        $service = $this->buildService();
+        $value = ['Informatique (prestations de services)', 'Logiciel'];
+        $this->assertSame('Informatique (prestations de services), Logiciel', $this->callStringify($service, $value));
+    }
+
+    public function testExtractDescriptionReadsMapaCharacteristics(): void
+    {
+        $details = [
+            'objet' => 'Exploitation et maintenance d\'une centrale photovoltaïque',
+            'descripteur_libelle' => ['Photovoltaïque', 'Maintenance'],
+            'donnees' => json_encode(['MAPA' => ['initial' => [
+                'description' => ['objet' => 'Exploitation et maintenance d\'une centrale photovoltaïque'],
+                'caracteristiques' => ['principales' => 'La présente consultation concerne l\'exploitation de la centrale.'],
+            ]]]),
+        ];
+
+        $this->assertSame(
+            'La présente consultation concerne l\'exploitation de la centrale.',
+            $this->buildService()->extractDescription($details),
+        );
+    }
+
+    public function testExtractDescriptionFallsBackToMapaObjectWhenCharacteristicsAreEmpty(): void
+    {
+        // Forme réelle de l'avis 26-101064 : « caracteristiques » est une chaîne vide.
+        $details = [
+            'objet' => 'La réalisation des prestations pour le déploiement d\'une plateforme d\'aide au conseil agricole',
+            'descripteur_libelle' => ['Informatique (prestations de services)', 'Logiciel'],
+            'donnees' => json_encode(['MAPA' => ['initial' => [
+                'description' => ['objet' => 'Conseil agricole assisté par intelligence artificielle'],
+                'caracteristiques' => '',
+            ]]]),
+        ];
+
+        $this->assertSame(
+            'Conseil agricole assisté par intelligence artificielle',
+            $this->buildService()->extractDescription($details),
+        );
+    }
+
+    public function testExtractDescriptionFallsBackToDescriptorsThenObject(): void
+    {
+        $service = $this->buildService();
+
+        $this->assertSame(
+            'Informatique (prestations de services), Logiciel',
+            $service->extractDescription(['objet' => 'Titre', 'descripteur_libelle' => ['Informatique (prestations de services)', 'Logiciel']]),
+        );
+        $this->assertSame('Titre', $service->extractDescription(['objet' => 'Titre', 'descripteur_libelle' => []]));
+    }
+
     public function testStringifyValueWithNull(): void
     {
         $service = $this->buildService();

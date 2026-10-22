@@ -4,6 +4,8 @@ namespace App\Tests\Service;
 
 use App\Entity\Product;
 use App\Entity\Market;
+use App\Repository\MarketRepository;
+use App\Repository\ProductRepository;
 use App\Service\AiService;
 use App\Service\BoampApiService;
 use App\Service\BoampFinderService;
@@ -104,20 +106,129 @@ class BoampFinderServiceTest extends TestCase
         $this->assertArrayHasKey(1, $result);
     }
 
-    private function buildService(): BoampFinderService
+    public function testRunSkipsAlreadyScoredMarketsBeforeFillingSlots(): void
     {
+        $productRepository = $this->createMock(ProductRepository::class);
+        $productRepository->method('findAll')->willReturn([(new Product())->setName('corpus')]);
+
+        $extractor = $this->createMock(ProductMetadataExtractor::class);
+        $extractor->method('extractMissing')->willReturn(['keywords' => ['logiciel'], 'sectors' => [], 'description' => '']);
+
+        $deadline = (new \DateTime('+60 days'))->format(\DATE_ATOM);
+        $idweb = static fn (int $i): string => "26-{$i}";
+        $results = array_map(static fn (int $i): array => ['idweb' => $idweb($i), 'datelimitereponse' => $deadline], range(1, 40));
+
+        $requested = [];
+        $boampApi = $this->createMock(BoampApiService::class);
+        $boampApi->method('searchMarkets')->willReturn($results);
+        $boampApi->method('getMarketDetails')->willReturnCallback(function (string $id) use (&$requested): ?array {
+            $requested[] = $id;
+
+            return null;
+        });
+
+        $marketRepository = $this->createMock(MarketRepository::class);
+        $marketRepository->method('findScoredIdwebs')->willReturn(array_map($idweb, range(1, 20)));
+        $marketRepository->method('findBy')->willReturn([]);
+
+        $result = $this->buildService($boampApi, $productRepository, $marketRepository, $extractor)->run();
+
+        $this->assertSame(40, $result->getCandidatesCount());
+        $this->assertSame(20, $result->getSkippedExisting());
+        $this->assertSame(array_map($idweb, range(21, 40)), $requested);
+    }
+
+    public function testFetchResultsReadsEveryPage(): void
+    {
+        $page = static fn (int $from, int $count): array => array_map(
+            static fn (int $i): array => ['idweb' => "26-{$i}"],
+            range($from, $from + $count - 1),
+        );
+
+        $offsets = [];
+        $boampApi = $this->createMock(BoampApiService::class);
+        $boampApi->method('searchMarkets')->willReturnCallback(
+            function (array $keywords, int $limit, ?string $sortBy, ?string $type, ?array $departments, int $offset) use (&$offsets, $page): array {
+                $offsets[] = $offset;
+
+                return 200 === $offset ? $page(201, 20) : $page($offset + 1, 100);
+            },
+        );
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects($this->never())->method('warning');
+
+        $results = $this->callPrivate($this->buildService($boampApi, logger: $logger), 'fetchResults', ['logiciel']);
+
+        $this->assertSame([0, 100, 200], $offsets);
+        $this->assertCount(220, $results);
+    }
+
+    public function testFetchResultsWarnsWhenCapIsReached(): void
+    {
+        $boampApi = $this->createMock(BoampApiService::class);
+        $boampApi->expects($this->exactly(10))->method('searchMarkets')->willReturn(array_fill(0, 100, ['idweb' => '26-1']));
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects($this->once())->method('warning')->with($this->stringContains('plafond'));
+
+        $results = $this->callPrivate($this->buildService($boampApi, logger: $logger), 'fetchResults', ['logiciel']);
+
+        $this->assertCount(1000, $results);
+    }
+
+    public function testCollectKeywordsExpandsAcronymAndIgnoresCase(): void
+    {
+        $keywordsByProduct = [
+            'xolo' => ['IA', 'logiciel'],
+            'aura' => ['ia', 'Logiciel', 'RGPD'],
+        ];
+        $extractor = $this->createMock(ProductMetadataExtractor::class);
+        $extractor->method('extractMissing')->willReturnCallback(
+            static fn (Product $p): array => ['keywords' => $keywordsByProduct[(string) $p->getName()] ?? [], 'sectors' => [], 'description' => ''],
+        );
+
+        $keywords = $this->callPrivate(
+            $this->buildService(extractor: $extractor),
+            'collectKeywords',
+            [(new Product())->setName('xolo'), (new Product())->setName('aura')],
+        );
+
+        $this->assertSame(['IA', 'intelligence artificielle', 'logiciel', 'RGPD'], $keywords);
+    }
+
+    public function testFindProductByNameIgnoresCase(): void
+    {
+        $corpus = (new Product())->setName('corpus');
+        $xolo = (new Product())->setName('xolo');
+
+        $this->assertSame($xolo, $this->callPrivate($this->buildService(), 'findProductByName', [$corpus, $xolo], 'Xolo'));
+    }
+
+    private function callPrivate(BoampFinderService $service, string $method, mixed ...$args): mixed
+    {
+        return (new \ReflectionMethod($service, $method))->invoke($service, ...$args);
+    }
+
+    private function buildService(
+        ?BoampApiService $boampApi = null,
+        ?ProductRepository $productRepository = null,
+        ?MarketRepository $marketRepository = null,
+        ?ProductMetadataExtractor $extractor = null,
+        ?LoggerInterface $logger = null,
+    ): BoampFinderService {
         return new BoampFinderService(
-            $this->createMock(BoampApiService::class),
+            $boampApi ?? $this->createMock(BoampApiService::class),
             $this->createMock(\App\Service\ScoringAgentService::class),
             $this->createMock(\App\Service\RocketChatNotifier::class),
-            $this->createMock(\App\Repository\ProductRepository::class),
-            $this->createMock(\App\Repository\MarketRepository::class),
+            $productRepository ?? $this->createMock(ProductRepository::class),
+            $marketRepository ?? $this->createMock(MarketRepository::class),
             $this->createMock(\App\Repository\MarketProductRepository::class),
             $this->createMock(\App\Repository\BoampReportRepository::class),
-            $this->createMock(ProductMetadataExtractor::class),
+            $extractor ?? $this->createMock(ProductMetadataExtractor::class),
             $this->createMock(\App\Service\PromptLoader::class),
             $this->createMock(EntityManagerInterface::class),
-            $this->createMock(LoggerInterface::class),
+            $logger ?? $this->createMock(LoggerInterface::class),
         );
     }
 

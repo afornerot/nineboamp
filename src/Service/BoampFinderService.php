@@ -19,6 +19,14 @@ class BoampFinderService
     private const MAX_DETAILS = 30;
     private const MIN_SCORE_NOTIFY = 50;
     private const MIN_DAYS_DEADLINE = 30;
+    private const MAX_KEYWORDS = 50;
+    private const PAGE_SIZE = 100;
+    private const MAX_RESULTS = 1000;
+
+    // La recherche BOAMP porte sur des mots entiers : un acronyme ne trouve pas sa forme développée.
+    private const KEYWORD_EXPANSIONS = [
+        'ia' => 'intelligence artificielle',
+    ];
 
     public function __construct(
         private BoampApiService $boampApi,
@@ -65,7 +73,7 @@ class BoampFinderService
 
             $io?->section('2/5 — Génération des mots-clés');
             $keywords = $this->collectKeywords($products);
-            $io?->writeln(sprintf('  → <info>%d</info> mot(s)-clé(s) unique(s) généré(s) (max 50 transmis à l\'API).', count($keywords)));
+            $io?->writeln(sprintf('  → <info>%d</info> mot(s)-clé(s) unique(s) généré(s) (max %d transmis à l\'API).', count($keywords), self::MAX_KEYWORDS));
             $io?->writeln(sprintf('  → Échantillon : <comment>%s</comment>', implode(', ', array_slice($keywords, 0, 8))));
             $this->logger->info('BoampFinderService: mots-clés générés', [
                 'keywords_count' => count($keywords),
@@ -73,7 +81,7 @@ class BoampFinderService
             ]);
 
             $io?->section('3/5 — Recherche OpenDataSoft (BOAMP)');
-            $results = $this->boampApi->searchMarkets($keywords, 100, 'dateparution DESC');
+            $results = $this->fetchResults($keywords);
             $io?->writeln(sprintf('  → <info>%d</info> résultat(s) brut(s) renvoyé(s) par l\'API.', count($results)));
             $this->logger->info('BoampFinderService: résultats API bruts', [
                 'results_count' => count($results),
@@ -85,6 +93,16 @@ class BoampFinderService
             $this->logger->info('BoampFinderService: candidats après filtre deadline', [
                 'candidates_count' => $candidatesCount,
             ]);
+
+            // Écartés avant de remplir les MAX_DETAILS places : sinon les marchés déjà
+            // scorés les occupent à chaque passage et les plus anciens ne passent jamais.
+            $scoredIdwebs = array_flip($this->marketRepository->findScoredIdwebs(array_column($candidates, 'idweb')));
+            $candidates = array_values(array_filter(
+                $candidates,
+                static fn (array $c): bool => !isset($scoredIdwebs[$c['idweb']]),
+            ));
+            $skippedExisting = $candidatesCount - count($candidates);
+            $io?->writeln(sprintf('  → <info>%d</info> déjà scoré(s), <info>%d</info> à scorer.', $skippedExisting, count($candidates)));
 
             $io?->section(sprintf('4/5 — Scoring IA (max %d marchés détaillés)', self::MAX_DETAILS));
             $toScore = array_slice($candidates, 0, self::MAX_DETAILS);
@@ -304,12 +322,55 @@ class BoampFinderService
 
         foreach ($products as $product) {
             $meta = $this->metadataExtractor->extractMissing($product);
-            $keywords = array_merge($keywords, $meta['keywords']);
+            foreach ($meta['keywords'] as $keyword) {
+                $keywords[] = $keyword;
+                $expansion = self::KEYWORD_EXPANSIONS[mb_strtolower($keyword)] ?? null;
+                if (null !== $expansion) {
+                    $keywords[] = $expansion;
+                }
+            }
         }
 
-        $keywords = array_values(array_unique($keywords));
+        // L'API ignore la casse : « IA » et « ia » occuperaient deux places pour rien.
+        $unique = [];
+        foreach ($keywords as $keyword) {
+            $unique[mb_strtolower($keyword)] ??= $keyword;
+        }
 
-        return array_slice($keywords, 0, 50);
+        return array_slice(array_values($unique), 0, self::MAX_KEYWORDS);
+    }
+
+    /**
+     * @param string[] $keywords
+     *
+     * @return array<array<string, mixed>>
+     */
+    private function fetchResults(array $keywords): array
+    {
+        $minDeadline = (new \DateTime())->modify('+'.self::MIN_DAYS_DEADLINE.' days');
+        $results = [];
+
+        // Toutes les pages, pas seulement les 100 avis les plus récents : sinon un
+        // marché publié quelques jours avant le passage n'est jamais vu.
+        for ($offset = 0; $offset < self::MAX_RESULTS; $offset += self::PAGE_SIZE) {
+            $page = $this->boampApi->searchMarkets(
+                $keywords,
+                self::PAGE_SIZE,
+                'dateparution DESC, idweb DESC',
+                offset: $offset,
+                minDeadline: $minDeadline,
+            );
+            $results = array_merge($results, $page);
+            if (count($page) < self::PAGE_SIZE) {
+                return $results;
+            }
+        }
+
+        $this->logger->warning('BoampFinderService: plafond de résultats atteint, les avis plus anciens sont ignorés', [
+            'max_results' => self::MAX_RESULTS,
+        ]);
+
+        return $results;
     }
 
     /**
@@ -436,8 +497,9 @@ class BoampFinderService
      */
     private function findProductByName(array $products, string $name): ?Product
     {
+        $name = mb_strtolower(trim($name));
         foreach ($products as $p) {
-            if ($p->getName() === $name) {
+            if (mb_strtolower(trim($p->getName() ?? '')) === $name) {
                 return $p;
             }
         }

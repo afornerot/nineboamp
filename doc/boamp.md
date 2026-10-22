@@ -70,25 +70,47 @@ Pour chaque produit, `ProductMetadataExtractor::extractMissing()` est appelé :
 - Le champ `sectors` est conservé comme métadonnée d'UI/score, mais n'est
   **pas** envoyé à l'API BOAMP (cette dernière ne sait exploiter que des
   codes départements).
+- Le mot-clé `IA` est complété par `intelligence artificielle` : la
+  recherche portant sur des mots entiers, l'acronyme ne trouve pas sa forme
+  développée (`KEYWORD_EXPANSIONS`).
+- Les doublons sont retirés sans tenir compte de la casse, puis la liste est
+  limitée à 50 mots-clés.
 
 ### 3. Recherche OpenDataSoft
 
-`BoampApiService::searchMarkets($keywords, 100, 'dateparution DESC')`
-construit une clause `where` du type :
+`fetchResults()` appelle `BoampApiService::searchMarkets()` page par page
+(100 avis par page, tri `dateparution DESC, idweb DESC`) jusqu'à la dernière,
+dans la limite de 1 000 avis. Si cette limite est atteinte, le warning
+`BoampFinderService: plafond de résultats atteint` est loggé : les avis les
+plus anciens ne sont alors pas lus.
+
+La clause `where` filtre déjà la date limite à +30 jours :
 
 ```
-((objet LIKE '%mot1%' OR descripteur_libelle LIKE '%mot1%') OR …)
-  AND datelimitereponse >= date'2026-09-14'
+((objet LIKE 'documentaire*' OR descripteur_libelle LIKE 'documentaire*') OR (objet LIKE 'IA' OR …) OR …)
+  AND datelimitereponse >= date'2026-11-21'
 ```
+
+En ODSQL, `LIKE` compare des mots entiers, sans tenir compte de la casse ni
+des accents. `%` n'y est pas un joker : seul `*` en fin de motif élargit la
+recherche (`documentaire*` trouve aussi « documentaires »). Il n'est ajouté
+que si le dernier mot fait au moins 4 lettres, sinon `SIG*` ramènerait
+« signature ». Une expression de plusieurs mots trouve ses mots dans
+n'importe quel ordre.
 
 Les mots-clés sont échappés (`\`, `'`, `"`) avant interpolation pour
 éviter les injections et les réponses vides silencieuses de l'API.
 
-### 4. Filtre deadline
+### 4. Filtre deadline et marchés déjà scorés
 
 `filterCandidates()` retient uniquement les marchés dont la date limite de
-réponse est ≥ `now() + 30 jours`. Les marchés expirés ou trop serrés sont
-exclus du scoring.
+réponse est ≥ `now() + 30 jours`, à l'heure près (l'API filtre au jour près).
+Les marchés expirés ou trop serrés sont exclus du scoring.
+
+Les marchés déjà scorés (score renseigné et statut autre que « détecté »)
+sont ensuite écartés **avant** de remplir les 30 places de scoring : sinon
+ils les occuperaient à chaque passage et les marchés plus anciens ne
+seraient jamais scorés.
 
 ### 5. Scoring IA
 
@@ -147,6 +169,9 @@ Constantes exposées dans `BoampFinderService` :
 | `MAX_DETAILS` | 30 | Nombre maximum de candidats détaillés par run |
 | `MIN_SCORE_NOTIFY` | 50 | Score minimum pour notification RocketChat (désactivée) |
 | `MIN_DAYS_DEADLINE` | 30 | Délai minimum avant clôture pour qu'un marché soit qualifié |
+| `MAX_KEYWORDS` | 50 | Nombre maximum de mots-clés transmis à l'API |
+| `PAGE_SIZE` | 100 | Avis demandés par page à l'API |
+| `MAX_RESULTS` | 1000 | Nombre maximum d'avis lus par run (toutes pages confondues) |
 | Bonus multi-produits | 0.15 | Coefficient de bonus par produit additionnel (score ≥ 50) |
 
 Côté LLM, les quotas dépendent du provider configuré. Voir `ai.md`.
@@ -167,8 +192,9 @@ BOAMP SEARCH
    → Échantillon : IA, Recherche, Souveraineté, Documentation, RGPD, ...
 
  3/5 — Recherche OpenDataSoft (BOAMP)
-   → 100 résultat(s) brut(s) renvoyé(s) par l'API.
-   → 35 candidat(s) retenu(s) après filtre deadline (≥ +30 jours).
+   → 141 résultat(s) brut(s) renvoyé(s) par l'API.
+   → 141 candidat(s) retenu(s) après filtre deadline (≥ +30 jours).
+   → 104 déjà scoré(s), 37 à scorer.
 
 4/5 — Scoring IA (max 30 marchés détaillés)
    → Scoring de 30 marché(s)…
@@ -186,7 +212,7 @@ BOAMP SEARCH
   +------------------------------+--------+
   | Étape                        | Valeur |
   +------------------------------+--------+
-  | Candidats (deadline ≥ +30j)  | 35     |
+  | Candidats (deadline ≥ +30j)  | 141    |
   | Marchés trouvés (boucle)     | 30     |
   | Marchés qualifiés (persistés)| 12     |
   | Marchés notifiés (RocketChat)| 0      |
@@ -202,7 +228,7 @@ BOAMP SEARCH
   | ...                                                                                          |
   +-----------+--------+-------+------------+-----------------------------+----------------------------+
 
- [OK] 12 marché(s) qualifié(s) sur 35 candidat(s).
+ [OK] 12 marché(s) qualifié(s) sur 141 candidat(s).
 ```
 
 L'option `--no-table` masque le tableau détaillé des marchés qualifiés (utile
@@ -220,6 +246,9 @@ quand le run produit beaucoup de résultats et qu'on veut juste le bilan).
 Erreurs possibles :
 
 - `BoampApiService: erreur recherche` — échec HTTP OpenDataSoft.
+- `BoampFinderService: plafond de résultats atteint` — plus de 1 000 avis
+  correspondent : les plus anciens ne sont pas lus. Relever `MAX_RESULTS` ou
+  resserrer les mots-clés.
 - `ProductMetadataExtractor: réponse IA vide — vérifiez AI_PROVIDER/AI_MODEL/...` — IA indisponible.
 - `AiService: erreur API LLM` — quota dépassé ou provider invalide.
 

@@ -8,6 +8,7 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 class BoampApiService
 {
     private const BASE_URL = 'https://boamp-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/boamp/records';
+    private const MIN_PREFIX_LENGTH = 4;
 
     public function __construct(
         private HttpClientInterface $httpClient,
@@ -27,8 +28,10 @@ class BoampApiService
         ?string $sortBy = 'dateparution DESC',
         ?string $type = null,
         ?array $departments = null,
+        int $offset = 0,
+        ?\DateTimeInterface $minDeadline = null,
     ): array {
-        $currentDate = (new \DateTime())->format('Y-m-d');
+        $minDate = ($minDeadline ?? new \DateTime())->format('Y-m-d');
 
         $escape = static function (string $value): string {
             return str_replace(
@@ -39,19 +42,23 @@ class BoampApiService
         };
 
         $keywordConditions = array_map(
-            static fn (string $k): string => sprintf(
-                "(objet LIKE '%%%s%%' OR descripteur_libelle LIKE '%%%s%%')",
-                $escape($k),
-                $escape($k),
-            ),
+            static function (string $k) use ($escape): string {
+                $pattern = self::likePattern($escape(trim($k)));
+
+                return sprintf("(objet LIKE '%s' OR descripteur_libelle LIKE '%s')", $pattern, $pattern);
+            },
             $keywords,
         );
-        $whereClause = '('.implode(' OR ', $keywordConditions).") AND datelimitereponse >= date'{$currentDate}'";
+        $whereClause = '('.implode(' OR ', $keywordConditions).") AND datelimitereponse >= date'{$minDate}'";
 
         $params = [
             'where' => $whereClause,
             'limit' => $limit,
         ];
+
+        if ($offset > 0) {
+            $params['offset'] = $offset;
+        }
 
         if ($sortBy) {
             $params['order_by'] = $sortBy;
@@ -80,7 +87,7 @@ class BoampApiService
             $data = $response->toArray();
             $results = $data['results'] ?? [];
 
-            if (0 === count($results)) {
+            if (0 === count($results) && 0 === $offset) {
                 $this->logger->warning('BoampApiService: 0 résultat retourné par l\'API', [
                     'params' => $params,
                 ]);
@@ -95,6 +102,19 @@ class BoampApiService
 
             return [];
         }
+    }
+
+    /**
+     * En ODSQL, LIKE compare des mots entiers, sans tenir compte de la casse ni
+     * des accents. « % » n'y est pas un joker : seul « * » en fin de motif
+     * élargit la recherche (« documentaire* » trouve aussi « documentaires »).
+     * Les mots courts restent exacts, sinon « SIG* » ramènerait « signature ».
+     */
+    private static function likePattern(string $keyword): string
+    {
+        $words = preg_split('/\s+/u', $keyword) ?: [$keyword];
+
+        return mb_strlen((string) end($words)) >= self::MIN_PREFIX_LENGTH ? $keyword.'*' : $keyword;
     }
 
     /**

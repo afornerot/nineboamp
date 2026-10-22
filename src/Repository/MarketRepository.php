@@ -38,4 +38,28 @@ class MarketRepository extends ServiceEntityRepository
             ->getQuery()
             ->getResult();
     }
+
+    /**
+     * Parmi les idweb donnés, ceux des marchés déjà scorés (hors statut « détecté »).
+     *
+     * @param string[] $idwebs
+     *
+     * @return string[]
+     */
+    public function findScoredIdwebs(array $idwebs): array
+    {
+        if ([] === $idwebs) {
+            return [];
+        }
+
+        return $this->createQueryBuilder('m')
+            ->select('m.idweb')
+            ->andWhere('m.idweb IN (:idwebs)')
+            ->andWhere('m.score IS NOT NULL')
+            ->andWhere('m.status <> :detected')
+            ->setParameter('idwebs', $idwebs)
+            ->setParameter('detected', Market::STATUS_DETECTED)
+            ->getQuery()
+            ->getSingleColumnResult();
+    }
 }

@@ -11,7 +11,9 @@ services:
     volumes:
       - ./volume/mariadb:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      # Le fichier .my-healthcheck.cnf est ignoré par mysql s'il est world-writable :
+      # on corrige les permissions avant de tester (volume bind existant).
+      test: ["CMD-SHELL", "chmod 600 /var/lib/mysql/.my-healthcheck.cnf && healthcheck.sh --connect --innodb_initialized"]
       interval: 5s
       timeout: 5s
       retries: 10

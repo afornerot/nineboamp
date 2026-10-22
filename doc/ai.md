@@ -44,7 +44,7 @@ L'agent IA tourne dans le container Docker sur le port interne **8000** et utili
 
 **Historique des conversations** : En base de données (`market_chat_message`), récupéré à chaque requête pour reconstruire le contexte.
 
-**Fichiers temporaires** : `/tmp/jobs-go/` (fichiers `.json` des jobs, nettoyés automatiquement après expiration).
+**Fichiers temporaires** : `/tmp/jobs-go/` (fichiers `.json` des jobs, supprimés `-job-max-age` après leur dernière écriture, 300 s par défaut). Un job en cours n'expire pas, même s'il dure plus longtemps (jusqu'à `-job-timeout`, 600 s). Si l'agent redémarre pendant un job, ce job passe en `error` (« job interrompu : l'agent a redémarré pendant son exécution »).
 
 ### Endpoint
 
@@ -191,4 +191,5 @@ Comptage dans le résumé de `app:boamp:search` :
 | Rate limit dépassé | Trop de requêtes simultanées | Patienter ou ajuster `AI_MODEL` / `AI_BASE_URL` |
 | `scoring : échec de l'appel structuré, repli sur l'appel texte` dans les logs de l'agent | Le provider ne répond pas, ou mal, en mode JSON structuré | Sans gravité si le repli aboutit. Si c'est systématique, chaque scoring perd `-score-structured-timeout` : baisser ce délai |
 | `scoring KO : … context deadline exceeded` ou `délai de l'agent dépassé` | Le LLM n'a répondu ni en mode structuré ni en texte dans les délais | Durées réelles : `docker compose logs nineboamp \| grep 'kind=score'`. Si le provider est lent, augmenter `-call-timeout` |
-| `scoring KO : aucun statut final de l'agent après … s` | Job perdu (agent redémarré pendant le scoring) ou agent bloqué : l'agent garantit sinon un statut à l'échéance | `docker compose logs nineboamp` autour de l'heure du scoring ; redémarrer le container si l'agent ne répond plus |
+| `job interrompu : l'agent a redémarré pendant son exécution` | L'agent a été relancé pendant le job, dont le résultat est perdu | Relancer l'action ; si l'agent redémarre souvent, voir `docker compose logs nineboamp` |
+| `scoring KO : aucun statut final de l'agent après … s` | Agent injoignable ou bloqué : il garantit sinon un statut à l'échéance | `docker compose logs nineboamp` autour de l'heure du scoring ; redémarrer le container si l'agent ne répond plus |

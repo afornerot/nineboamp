@@ -279,6 +279,9 @@ func TestScoreParseFailure(t *testing.T) {
 	if scoreErr.RawResponse != "désolé je ne peux pas" {
 		t.Errorf("raw_response = %q", scoreErr.RawResponse)
 	}
+	if scoreErr.Code != ScoreErrorParse {
+		t.Errorf("code = %q, attendu %q", scoreErr.Code, ScoreErrorParse)
+	}
 }
 
 func TestScoreAPIErrorBothCalls(t *testing.T) {
@@ -295,6 +298,9 @@ func TestScoreAPIErrorBothCalls(t *testing.T) {
 	}
 	if !strings.Contains(result.(ScoreError).Error, "boom texte") {
 		t.Errorf("error = %q", result.(ScoreError).Error)
+	}
+	if result.(ScoreError).Code == ScoreErrorParse {
+		t.Error("un échec d'API ne doit pas passer pour une réponse inexploitable")
 	}
 }
 
@@ -411,5 +417,18 @@ func TestScoreStructuredTimeoutDefault(t *testing.T) {
 	svc := newService(t, &fakeClient{}, nil, Config{})
 	if svc.cfg.ScoreStructuredTimeout != 45*time.Second {
 		t.Errorf("ScoreStructuredTimeout par défaut = %s", svc.cfg.ScoreStructuredTimeout)
+	}
+}
+
+func TestScoreTimeoutCoversBothCalls(t *testing.T) {
+	svc := New(&fakeClient{}, testPrompts(t), nil, Config{CallTimeout: 120 * time.Second})
+	if got := svc.ScoreTimeout(); got != 165*time.Second {
+		t.Errorf("ScoreTimeout = %s, attendu 45s + 120s", got)
+	}
+
+	// La tentative structurée ne dépasse jamais l'appel texte.
+	svc = New(&fakeClient{}, testPrompts(t), nil, Config{CallTimeout: 30 * time.Second, ScoreStructuredTimeout: 45 * time.Second})
+	if got := svc.ScoreTimeout(); got != 60*time.Second {
+		t.Errorf("ScoreTimeout = %s, attendu 30s + 30s", got)
 	}
 }

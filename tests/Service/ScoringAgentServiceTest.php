@@ -26,13 +26,13 @@ class ScoringAgentServiceTest extends TestCase
     public function testAgentErrorStopsWaitingImmediately(): void
     {
         $client = new MockHttpClient([
-            new MockResponse('{"status":"error","result":{"error":"Impossible de parser la réponse JSON"}}'),
+            new MockResponse('{"status":"error","result":{"error":"Impossible de parser la réponse JSON","code":"parse"}}'),
             new MockResponse('{"status":"done","result":{"score":75}}'),
         ]);
 
         $job = (new ScoringAgentService($client, new NullLogger()))->waitForResult('job-1', 10, 0);
 
-        $this->assertSame(['status' => 'error', 'error' => 'Impossible de parser la réponse JSON'], $job);
+        $this->assertSame(['status' => 'error', 'error' => 'Impossible de parser la réponse JSON', 'code' => 'parse'], $job);
         $this->assertSame(1, $client->getRequestsCount());
     }
 
@@ -68,18 +68,32 @@ class ScoringAgentServiceTest extends TestCase
         $this->assertSame('not_found', $job['status']);
     }
 
+    public function testAgentFailureKeepsItsReasonWithoutParseCode(): void
+    {
+        $client = new MockHttpClient([new MockResponse('{"status":"error","result":{"error":"délai de l\'agent dépassé (2m45s)"}}')]);
+
+        $job = (new ScoringAgentService($client, new NullLogger()))->waitForResult('job-1', 10, 0);
+
+        $this->assertSame(['status' => 'error', 'error' => 'délai de l\'agent dépassé (2m45s)', 'code' => null], $job);
+    }
+
     public function testTimeoutWhileStillPending(): void
     {
         $client = new MockHttpClient(static fn (): MockResponse => new MockResponse('{"status":"pending","result":null}'));
 
-        $job = (new ScoringAgentService($client, new NullLogger()))->waitForResult('job-1', 0, 0);
+        $job = (new ScoringAgentService($client, new NullLogger()))->waitForResult('job-1', 0, 0, 0);
 
-        $this->assertSame(['status' => 'timeout', 'error' => 'pas de résultat de l\'agent après 0 s'], $job);
+        $this->assertSame(['status' => 'timeout', 'error' => 'aucun statut final de l\'agent après 0 s (job perdu ou agent bloqué)'], $job);
+        // Le dernier poll a lieu à l'échéance, pas avant.
+        $this->assertSame(1, $client->getRequestsCount());
     }
 
-    public function testResultTimeoutCoversAgentWorstCase(): void
+    public function testStartScoringJobReturnsTheAgentTimeout(): void
     {
-        // Pire cas d'un job de scoring côté agent : appel structuré (45 s) puis repli texte (120 s).
-        $this->assertGreaterThan(45 + 120, ScoringAgentService::RESULT_TIMEOUT);
+        $client = new MockHttpClient([new MockResponse('{"job_id":"job-1","timeout":165}')]);
+
+        $started = (new ScoringAgentService($client, new NullLogger()))->startScoringJob(1, 't', 'b', 'd', '1000', null, []);
+
+        $this->assertSame(['job_id' => 'job-1', 'timeout' => 165], $started);
     }
 }

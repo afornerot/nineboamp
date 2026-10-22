@@ -97,7 +97,7 @@ class MarketController extends AbstractController
             ];
         }
 
-        $jobId = $scoringAgent->startScoringJob(
+        $job = $scoringAgent->startScoringJob(
             $market->getId(),
             $market->getTitle() ?? '',
             $market->getBuyer() ?? '',
@@ -107,11 +107,11 @@ class MarketController extends AbstractController
             $products
         );
 
-        if (null === $jobId) {
+        if (null === $job) {
             return new JsonResponse(['error' => 'Impossible de démarrer le scoring'], 500);
         }
 
-        return new JsonResponse(['pending' => true, 'jobId' => $jobId]);
+        return new JsonResponse(['pending' => true, 'jobId' => $job['job_id']]);
     }
 
     #[Route('/user/market/{id}/rescore/poll/{jobId}', name: 'app_market_rescore_poll', methods: ['GET'])]

@@ -43,6 +43,7 @@ func (s *Service) Score(ctx context.Context, req ScoreRequest) (status string, r
 	if parseErr != nil {
 		return StatusError, ScoreError{
 			Error:       "Impossible de parser la réponse JSON",
+			Code:        ScoreErrorParse,
 			RawResponse: truncateRunes(content, 500),
 			ToolsUsed:   []string{},
 		}

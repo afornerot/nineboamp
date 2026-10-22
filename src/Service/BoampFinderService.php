@@ -12,6 +12,7 @@ use App\Repository\MarketRepository;
 use App\Repository\ProductRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\Console\Formatter\OutputFormatter;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 class BoampFinderService
@@ -175,7 +176,7 @@ class BoampFinderService
                         'idweb' => $idweb,
                         'error' => $e->getMessage(),
                     ]);
-                    $progress?->setMessage(sprintf('<error>%s — scoring KO : %s</error>', $idweb, $e->getMessage()));
+                    $progress?->setMessage(sprintf('<error>%s — scoring KO : %s</error>', $idweb, OutputFormatter::escape($e->getMessage())));
                     $progress?->advance();
                     sleep(2);
                     continue;
@@ -441,7 +442,7 @@ class BoampFinderService
         $this->em->flush();
         $marketId = $market->getId();
 
-        $jobId = $this->scoringAgent->startScoringJob(
+        $started = $this->scoringAgent->startScoringJob(
             $marketId,
             $title ?? '',
             $buyer,
@@ -451,18 +452,22 @@ class BoampFinderService
             $productsData
         );
 
-        if (null === $jobId) {
+        if (null === $started) {
             throw new \RuntimeException('job de scoring non démarré, agent injoignable');
         }
 
-        $job = $this->scoringAgent->waitForResult($jobId);
+        $jobId = $started['job_id'];
+        $job = $this->scoringAgent->waitForResult($jobId, $started['timeout']);
 
-        // Erreur rendue par l'agent (réponse LLM inexploitable, API en échec) : « IA non exploitable ».
-        // Délai dépassé ou job perdu : le scoring n'a pas abouti, l'appelant l'affiche avec sa raison.
-        if ('error' === $job['status']) {
-            return null;
-        }
         if ('done' !== $job['status']) {
+            // Le LLM a répondu, mais de façon inexploitable : « IA non exploitable ».
+            if ('parse' === ($job['code'] ?? null)) {
+                $this->logger->warning('BoampFinderService: réponse IA non exploitable', ['idweb' => $market->getIdweb(), 'job_id' => $jobId]);
+
+                return null;
+            }
+
+            // API en échec, délai dépassé, job perdu : l'appelant l'affiche avec sa raison.
             throw new \RuntimeException(sprintf('%s (job %s)', $job['error'], $jobId));
         }
         $result = $job['result'];

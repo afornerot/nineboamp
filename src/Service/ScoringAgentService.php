@@ -9,9 +9,12 @@ class ScoringAgentService
 {
     private const AGENT_URL = 'http://127.0.0.1:8000';
 
-    // Doit couvrir le pire cas d'un job de scoring côté agent (cmd/nineagent) :
-    // -score-structured-timeout (45 s) puis le repli texte -call-timeout (120 s).
-    public const RESULT_TIMEOUT = 180;
+    // Marge au-delà du délai annoncé par l'agent (après lequel il garantit un statut
+    // final) : intervalle de poll et timeout HTTP d'un poll.
+    private const RESULT_MARGIN = 20;
+
+    // Délai d'attente si l'agent n'en annonce pas.
+    private const DEFAULT_AGENT_TIMEOUT = 180;
 
     public function __construct(
         private \Symfony\Contracts\HttpClient\HttpClientInterface $httpClient,
@@ -22,7 +25,7 @@ class ScoringAgentService
     /**
      * Start a scoring job.
      *
-     * @return string|null Job ID or null on error
+     * @return array{job_id: string, timeout: int}|null Job ID et délai (s) au bout duquel l'agent garantit un statut final, null on error
      */
     public function startScoringJob(
         int $marketId,
@@ -32,7 +35,7 @@ class ScoringAgentService
         string $amount,
         ?string $deadline,
         array $products
-    ): ?string {
+    ): ?array {
         try {
             $response = $this->httpClient->request('POST', self::AGENT_URL . '/score', [
                 'json' => [
@@ -48,8 +51,11 @@ class ScoringAgentService
             ]);
 
             $data = $response->toArray();
+            if (!isset($data['job_id'])) {
+                return null;
+            }
 
-            return $data['job_id'] ?? null;
+            return ['job_id' => $data['job_id'], 'timeout' => (int) ($data['timeout'] ?? self::DEFAULT_AGENT_TIMEOUT)];
         } catch (\Throwable $e) {
             $this->logger->error('ScoringAgentService: failed to start scoring job', [
                 'error' => $e->getMessage(),
@@ -63,7 +69,7 @@ class ScoringAgentService
     /**
      * Get scoring result (single check, no polling).
      *
-     * @return array{status: string, result?: array}
+     * @return array<string, mixed>
      */
     public function getScoringResult(string $jobId): array
     {
@@ -98,13 +104,18 @@ class ScoringAgentService
     /**
      * Wait synchronously for scoring result.
      *
-     * @return array{status: 'done', result: array}|array{status: 'error'|'not_found'|'timeout', error: string}
+     * $agentTimeout est le délai annoncé par startScoringJob() : passé ce délai, l'agent
+     * a écrit un statut final ; un job encore en attente au-delà est perdu.
+     * Le code d'erreur 'parse' signale une réponse du LLM reçue mais inexploitable.
+     *
+     * @return array{status: 'done', result: array<string, mixed>}|array{status: 'error', error: string, code: ?string}|array{status: 'not_found'|'timeout', error: string}
      */
-    public function waitForResult(string $jobId, int $timeoutSeconds = self::RESULT_TIMEOUT, int $delaySeconds = 2): array
+    public function waitForResult(string $jobId, int $agentTimeout, int $delaySeconds = 2, int $marginSeconds = self::RESULT_MARGIN): array
     {
+        $timeoutSeconds = $agentTimeout + $marginSeconds;
         $deadline = time() + $timeoutSeconds;
 
-        do {
+        while (true) {
             try {
                 $job = $this->fetchJob($jobId);
             } catch (\Throwable $e) {
@@ -113,8 +124,7 @@ class ScoringAgentService
                     'error' => $e->getMessage(),
                     'job_id' => $jobId,
                 ]);
-                sleep($delaySeconds);
-                continue;
+                $job = [];
             }
 
             $status = $job['status'] ?? null;
@@ -131,7 +141,7 @@ class ScoringAgentService
                     'raw_response' => $job['result']['raw_response'] ?? null,
                 ]);
 
-                return ['status' => 'error', 'error' => $error];
+                return ['status' => 'error', 'error' => $error, 'code' => $job['result']['code'] ?? null];
             }
 
             if ('not_found' === $status) {
@@ -140,16 +150,20 @@ class ScoringAgentService
                 return ['status' => 'not_found', 'error' => 'job introuvable côté agent'];
             }
 
+            // Dernier poll fait à l'échéance ou après : un job fini pendant le sleep est vu.
+            if (time() >= $deadline) {
+                break;
+            }
             sleep($delaySeconds);
-        } while (time() < $deadline);
+        }
 
         $this->logger->warning('ScoringAgentService: timeout waiting for result', ['job_id' => $jobId, 'timeout' => $timeoutSeconds]);
 
-        return ['status' => 'timeout', 'error' => sprintf('pas de résultat de l\'agent après %d s', $timeoutSeconds)];
+        return ['status' => 'timeout', 'error' => sprintf('aucun statut final de l\'agent après %d s (job perdu ou agent bloqué)', $timeoutSeconds)];
     }
 
     /**
-     * @return array{status: string, result?: mixed}
+     * @return array<string, mixed>
      */
     private function fetchJob(string $jobId): array
     {

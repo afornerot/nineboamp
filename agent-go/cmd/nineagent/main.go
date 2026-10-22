@@ -41,7 +41,7 @@ func main() {
 		amoxtliDir         = flag.String("amoxtli-dir", "/app/uploads/amoxtli", "dossier des workspaces amoxtli")
 		maxIterations      = flag.Int("max-iterations", 10, "itérations max de la boucle d'outils")
 		callTimeout        = flag.Duration("call-timeout", 120*time.Second, "timeout d'un appel LLM (chat/score)")
-		scoreStructTimeout = flag.Duration("score-structured-timeout", 45*time.Second, "timeout de la tentative structurée du scoring avant repli texte (garder ScoringAgentService::RESULT_TIMEOUT > ce délai + call-timeout)")
+		scoreStructTimeout = flag.Duration("score-structured-timeout", 45*time.Second, "timeout de la tentative structurée du scoring avant repli texte (plafonné à call-timeout)")
 		reportCallTimeout  = flag.Duration("report-call-timeout", 180*time.Second, "timeout d'un appel LLM (rapport)")
 		debug              = flag.Bool("debug", false, "logs debug")
 	)
@@ -97,10 +97,11 @@ func main() {
 	httpServer := &http.Server{
 		Addr: *addr,
 		Handler: server.New(server.Config{
-			Jobs:       store,
-			Runner:     svc,
-			JobTimeout: *jobTimeout,
-			Logger:     logger,
+			Jobs:         store,
+			Runner:       svc,
+			JobTimeout:   *jobTimeout,
+			ScoreTimeout: svc.ScoreTimeout(),
+			Logger:       logger,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

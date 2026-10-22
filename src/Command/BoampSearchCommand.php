@@ -59,7 +59,7 @@ class BoampSearchCommand extends Command
                 ['Déjà en base (déjà scorés)', $result->getSkippedExisting()],
                 ['Détails indisponibles', $result->getSkippedNoDetails()],
                 ['Réponse IA non exploitable', $result->getSkippedParseError()],
-                ['Scoring KO (délai dépassé, agent injoignable…)', $result->getSkippedScoringError()],
+                ['Scoring KO (API en échec, délai dépassé, agent injoignable…)', $result->getSkippedScoringError()],
             ];
             $io->table(['Raison', 'Nombre'], $skips);
         }

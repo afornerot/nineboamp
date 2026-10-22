@@ -40,6 +40,7 @@
                 <th width="70px" class="no-sort">Action</th>
                 <th>Score</th>
                 <th>Priorité</th>
+                <th>N° BOAMP</th>
                 <th>Titre</th>
                 <th>Acheteur</th>
                 <th>Statut</th>
@@ -58,6 +59,7 @@
                     {% elseif market.priority == 'B' %}<span class="badge bg-warning">{{ market.priority }}</span>
                     {% else %}<span class="badge bg-secondary">{{ market.priority }}</span>{% endif %}
                 </td>
+                <td data-order="{{ market.idweb ?? '' }}">{{ market.idweb ?? '?' }}</td>
                 <td>{{ market.title|length > 60 ? market.title|slice(0, 60) ~ '…' : market.title }}</td>
                 <td>{{ market.buyer|length > 30 ? market.buyer|slice(0, 30) ~ '…' : market.buyer }}</td>
                 <td data-status="{{ market.status }}">

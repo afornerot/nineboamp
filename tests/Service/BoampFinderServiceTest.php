@@ -4,12 +4,15 @@ namespace App\Tests\Service;
 
 use App\Entity\Product;
 use App\Entity\Market;
+use App\Entity\MarketProduct;
+use App\Repository\MarketProductRepository;
 use App\Repository\MarketRepository;
 use App\Repository\ProductRepository;
 use App\Service\AiService;
 use App\Service\BoampApiService;
 use App\Service\BoampFinderService;
 use App\Service\ProductMetadataExtractor;
+use App\Service\ScoringAgentService;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -41,6 +44,59 @@ class BoampFinderServiceTest extends TestCase
         $result = $this->callStringify($service, $value);
         $this->assertStringContainsString('Informatique', $result);
         $this->assertStringContainsString('Services', $result);
+    }
+
+    public function testStringifyValueJoinsListOfLabels(): void
+    {
+        $service = $this->buildService();
+        $value = ['Informatique (prestations de services)', 'Logiciel'];
+        $this->assertSame('Informatique (prestations de services), Logiciel', $this->callStringify($service, $value));
+    }
+
+    public function testExtractDescriptionReadsMapaCharacteristics(): void
+    {
+        $details = [
+            'objet' => 'Exploitation et maintenance d\'une centrale photovoltaïque',
+            'descripteur_libelle' => ['Photovoltaïque', 'Maintenance'],
+            'donnees' => json_encode(['MAPA' => ['initial' => [
+                'description' => ['objet' => 'Exploitation et maintenance d\'une centrale photovoltaïque'],
+                'caracteristiques' => ['principales' => 'La présente consultation concerne l\'exploitation de la centrale.'],
+            ]]]),
+        ];
+
+        $this->assertSame(
+            'La présente consultation concerne l\'exploitation de la centrale.',
+            $this->buildService()->extractDescription($details),
+        );
+    }
+
+    public function testExtractDescriptionFallsBackToMapaObjectWhenCharacteristicsAreEmpty(): void
+    {
+        // Forme réelle de l'avis 26-101064 : « caracteristiques » est une chaîne vide.
+        $details = [
+            'objet' => 'La réalisation des prestations pour le déploiement d\'une plateforme d\'aide au conseil agricole',
+            'descripteur_libelle' => ['Informatique (prestations de services)', 'Logiciel'],
+            'donnees' => json_encode(['MAPA' => ['initial' => [
+                'description' => ['objet' => 'Conseil agricole assisté par intelligence artificielle'],
+                'caracteristiques' => '',
+            ]]]),
+        ];
+
+        $this->assertSame(
+            'Conseil agricole assisté par intelligence artificielle',
+            $this->buildService()->extractDescription($details),
+        );
+    }
+
+    public function testExtractDescriptionFallsBackToDescriptorsThenObject(): void
+    {
+        $service = $this->buildService();
+
+        $this->assertSame(
+            'Informatique (prestations de services), Logiciel',
+            $service->extractDescription(['objet' => 'Titre', 'descripteur_libelle' => ['Informatique (prestations de services)', 'Logiciel']]),
+        );
+        $this->assertSame('Titre', $service->extractDescription(['objet' => 'Titre', 'descripteur_libelle' => []]));
     }
 
     public function testStringifyValueWithNull(): void
@@ -192,6 +248,47 @@ class BoampFinderServiceTest extends TestCase
         $this->assertSame($xolo, $this->callPrivate($this->buildService(), 'findProductByName', [$corpus, $xolo], 'Xolo'));
     }
 
+    public function testRescoreMarketKeepsProductsWhenAgentFails(): void
+    {
+        $scoringAgent = $this->createMock(ScoringAgentService::class);
+        $scoringAgent->method('startScoringJob')->willReturn(null);
+        $em = $this->createMock(EntityManagerInterface::class);
+        $em->expects($this->never())->method('remove');
+
+        [$service, $market, $old] = $this->buildRescore($scoringAgent, $em);
+
+        try {
+            $service->rescoreMarket($market);
+            $this->fail('Un scoring sans résultat doit lever une exception.');
+        } catch (\RuntimeException) {
+        }
+
+        $this->assertSame([$old], $market->getMarketProducts()->getValues());
+        $this->assertSame(Market::STATUS_GO, $market->getStatus());
+    }
+
+    public function testRescoreMarketReplacesProductsAndKeepsUserStatus(): void
+    {
+        $scoringAgent = $this->createMock(ScoringAgentService::class);
+        $scoringAgent->method('startScoringJob')->willReturn('job-1');
+        $scoringAgent->method('waitForResult')->willReturn([
+            'score' => 80,
+            'priority' => 'A',
+            'products' => [['name' => 'corpus', 'score' => 80]],
+        ]);
+        $em = $this->createMock(EntityManagerInterface::class);
+
+        [$service, $market, $old] = $this->buildRescore($scoringAgent, $em);
+        $em->expects($this->once())->method('remove')->with($old);
+
+        $service->rescoreMarket($market);
+
+        $this->assertSame(80, $market->getScore());
+        $this->assertSame(Market::STATUS_GO, $market->getStatus());
+        $this->assertCount(1, $market->getMarketProducts());
+        $this->assertNotContains($old, $market->getMarketProducts());
+    }
+
     private function callPrivate(BoampFinderService $service, string $method, mixed ...$args): mixed
     {
         return (new \ReflectionMethod($service, $method))->invoke($service, ...$args);
@@ -249,20 +346,55 @@ class BoampFinderServiceTest extends TestCase
         ?MarketRepository $marketRepository = null,
         ?ProductMetadataExtractor $extractor = null,
         ?LoggerInterface $logger = null,
+        ?ScoringAgentService $scoringAgent = null,
+        ?MarketProductRepository $marketProductRepository = null,
+        ?EntityManagerInterface $em = null,
     ): BoampFinderService {
         return new BoampFinderService(
             $boampApi ?? $this->createMock(BoampApiService::class),
-            $this->createMock(\App\Service\ScoringAgentService::class),
+            $scoringAgent ?? $this->createMock(ScoringAgentService::class),
             $this->createMock(\App\Service\RocketChatNotifier::class),
             $productRepository ?? $this->createMock(ProductRepository::class),
             $marketRepository ?? $this->createMock(MarketRepository::class),
-            $this->createMock(\App\Repository\MarketProductRepository::class),
+            $marketProductRepository ?? $this->createMock(MarketProductRepository::class),
             $this->createMock(\App\Repository\BoampReportRepository::class),
             $extractor ?? $this->createMock(ProductMetadataExtractor::class),
             $this->createMock(\App\Service\PromptLoader::class),
-            $this->createMock(EntityManagerInterface::class),
+            $em ?? $this->createMock(EntityManagerInterface::class),
             $logger ?? $this->createMock(LoggerInterface::class),
         );
+    }
+
+    /**
+     * Marché déjà qualifié puis trié par l'utilisateur, avec une correspondance produit.
+     *
+     * @return array{BoampFinderService, Market, MarketProduct}
+     */
+    private function buildRescore(ScoringAgentService $scoringAgent, EntityManagerInterface $em): array
+    {
+        $product = (new Product())->setName('corpus');
+        $market = (new Market())
+            ->setIdweb('26-101064')
+            ->setTitle('Conseil agricole')
+            ->setRawData(json_encode(['objet' => 'Conseil agricole']))
+            ->setStatus(Market::STATUS_GO);
+        (new \ReflectionProperty($market, 'id'))->setValue($market, 42);
+        $old = (new MarketProduct())->setProduct($product)->setScore(30);
+        $market->addMarketProduct($old);
+
+        $productRepository = $this->createMock(ProductRepository::class);
+        $productRepository->method('findAll')->willReturn([$product]);
+        $marketProductRepository = $this->createMock(MarketProductRepository::class);
+        $marketProductRepository->method('findByMarket')->with(42)->willReturn([$old]);
+
+        $service = $this->buildService(
+            productRepository: $productRepository,
+            scoringAgent: $scoringAgent,
+            marketProductRepository: $marketProductRepository,
+            em: $em,
+        );
+
+        return [$service, $market, $old];
     }
 
     private function callStringify(BoampFinderService $service, mixed $value): string

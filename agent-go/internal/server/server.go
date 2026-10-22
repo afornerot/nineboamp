@@ -122,7 +122,7 @@ func (h *handler) start(w http.ResponseWriter, r *http.Request, kind string, tim
 	h.jobs.Cleanup()
 
 	jobID := uuid.New().String()
-	if err := h.jobs.Save(jobID, jobs.StatusPending, nil); err != nil {
+	if err := h.jobs.Start(jobID); err != nil {
 		h.logger.Error("création du job impossible", "kind", kind, "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "impossible de créer le job"})
 		return
@@ -155,7 +155,7 @@ func (h *handler) start(w http.ResponseWriter, r *http.Request, kind string, tim
 			out = outcome{jobs.StatusError, map[string]any{"error": fmt.Sprintf("délai de l'agent dépassé (%s)", timeout)}}
 		}
 
-		if err := h.jobs.Save(jobID, out.status, out.result); err != nil {
+		if err := h.jobs.Finish(jobID, out.status, out.result); err != nil {
 			h.logger.Error("écriture du résultat impossible", "kind", kind, "job_id", jobID, "error", err)
 			return
 		}

@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -50,11 +52,13 @@ func newTestServer(t *testing.T, runner Runner) *httptest.Server {
 
 func newTestServerWith(t *testing.T, cfg Config) *httptest.Server {
 	t.Helper()
-	store, err := jobs.NewStore(t.TempDir(), 300*time.Second)
-	if err != nil {
-		t.Fatal(err)
+	if cfg.Jobs == nil {
+		store, err := jobs.NewStore(t.TempDir(), 300*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.Jobs = store
 	}
-	cfg.Jobs = store
 	srv := httptest.NewServer(New(cfg))
 	t.Cleanup(srv.Close)
 	return srv
@@ -200,6 +204,32 @@ func TestScoreJobEndsInErrorAtItsDeadline(t *testing.T) {
 	if errMsg, _ := job["result"].(map[string]any)["error"].(string); !strings.Contains(errMsg, "délai de l'agent dépassé") {
 		t.Errorf("result = %v", job["result"])
 	}
+}
+
+func TestNewJobDoesNotExpireARunningOne(t *testing.T) {
+	store, err := jobs.NewStore(t.TempDir(), 300*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &stubRunner{chatStatus: flow.StatusDone, chatResult: flow.ChatResult{Answer: "réponse"}, chatBlock: make(chan struct{})}
+	srv := newTestServerWith(t, Config{Runner: runner, Jobs: store})
+
+	_, body := post(t, srv.URL+"/chat", `{"market_id": 1, "message": "x"}`)
+	chatID := body["job_id"].(string)
+
+	// Le chat tourne depuis plus que job-max-age quand un autre job démarre
+	// (et nettoie les vieux jobs).
+	old := time.Now().Add(-10 * time.Minute)
+	if err := os.Chtimes(filepath.Join(store.Dir(), chatID+".json"), old, old); err != nil {
+		t.Fatal(err)
+	}
+	post(t, srv.URL+"/score", `{"market_id": 1}`)
+
+	if _, job := get(t, srv.URL+"/chat/result/"+chatID); job["status"] != "pending" {
+		t.Fatalf("le chat en cours ne doit pas être perdu : %v", job)
+	}
+	close(runner.chatBlock)
+	waitForStatus(t, srv.URL+"/chat/result/"+chatID, "done")
 }
 
 func waitForStatus(t *testing.T, url, want string) {

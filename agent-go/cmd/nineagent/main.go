@@ -30,19 +30,20 @@ import (
 
 func main() {
 	var (
-		addr              = flag.String("addr", "127.0.0.1:8000", "adresse d'écoute HTTP")
-		envDir            = flag.String("env-dir", ".", "dossier contenant .env.local puis .env")
-		promptsDir        = flag.String("prompts-dir", "", "dossier des prompts markdown (défaut: auto)")
-		jobsDir           = flag.String("jobs-dir", "/tmp/jobs-go", "dossier des fichiers de job")
-		jobMaxAge         = flag.Duration("job-max-age", 300*time.Second, "âge maximal d'un job")
-		jobTimeout        = flag.Duration("job-timeout", 10*time.Minute, "timeout global d'un job")
-		apiBase           = flag.String("api-base", "http://127.0.0.1", "base URL de l'API PHP (outils produits)")
-		amoxtliBin        = flag.String("amoxtli-bin", "/usr/local/bin/amoxtli", "binaire amoxtli")
-		amoxtliDir        = flag.String("amoxtli-dir", "/app/uploads/amoxtli", "dossier des workspaces amoxtli")
-		maxIterations     = flag.Int("max-iterations", 10, "itérations max de la boucle d'outils")
-		callTimeout       = flag.Duration("call-timeout", 120*time.Second, "timeout d'un appel LLM (chat/score)")
-		reportCallTimeout = flag.Duration("report-call-timeout", 180*time.Second, "timeout d'un appel LLM (rapport)")
-		debug             = flag.Bool("debug", false, "logs debug")
+		addr               = flag.String("addr", "127.0.0.1:8000", "adresse d'écoute HTTP")
+		envDir             = flag.String("env-dir", ".", "dossier contenant .env.local puis .env")
+		promptsDir         = flag.String("prompts-dir", "", "dossier des prompts markdown (défaut: auto)")
+		jobsDir            = flag.String("jobs-dir", "/tmp/jobs-go", "dossier des fichiers de job")
+		jobMaxAge          = flag.Duration("job-max-age", 300*time.Second, "âge maximal d'un job")
+		jobTimeout         = flag.Duration("job-timeout", 10*time.Minute, "timeout global d'un job")
+		apiBase            = flag.String("api-base", "http://127.0.0.1", "base URL de l'API PHP (outils produits)")
+		amoxtliBin         = flag.String("amoxtli-bin", "/usr/local/bin/amoxtli", "binaire amoxtli")
+		amoxtliDir         = flag.String("amoxtli-dir", "/app/uploads/amoxtli", "dossier des workspaces amoxtli")
+		maxIterations      = flag.Int("max-iterations", 10, "itérations max de la boucle d'outils")
+		callTimeout        = flag.Duration("call-timeout", 120*time.Second, "timeout d'un appel LLM (chat/score)")
+		scoreStructTimeout = flag.Duration("score-structured-timeout", 45*time.Second, "timeout de la tentative structurée du scoring avant repli texte (plafonné à call-timeout)")
+		reportCallTimeout  = flag.Duration("report-call-timeout", 180*time.Second, "timeout d'un appel LLM (rapport)")
+		debug              = flag.Bool("debug", false, "logs debug")
 	)
 	flag.Parse()
 
@@ -80,9 +81,11 @@ func main() {
 	})
 
 	svc := flow.New(client, p, toolSet.All(), flow.Config{
-		MaxIterations:     *maxIterations,
-		CallTimeout:       *callTimeout,
-		ReportCallTimeout: *reportCallTimeout,
+		MaxIterations:          *maxIterations,
+		CallTimeout:            *callTimeout,
+		ReportCallTimeout:      *reportCallTimeout,
+		ScoreStructuredTimeout: *scoreStructTimeout,
+		Logger:                 logger,
 	})
 
 	store, err := jobs.NewStore(*jobsDir, *jobMaxAge)
@@ -94,10 +97,11 @@ func main() {
 	httpServer := &http.Server{
 		Addr: *addr,
 		Handler: server.New(server.Config{
-			Jobs:       store,
-			Runner:     svc,
-			JobTimeout: *jobTimeout,
-			Logger:     logger,
+			Jobs:         store,
+			Runner:       svc,
+			JobTimeout:   *jobTimeout,
+			ScoreTimeout: svc.ScoreTimeout(),
+			Logger:       logger,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

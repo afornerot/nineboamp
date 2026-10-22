@@ -159,6 +159,29 @@ Le service applique automatiquement :
 Si un appel LLM échoue après les retries, `AiService::ask()` retourne `''` et
 un log d'erreur est émis (`var/log/dev.log` → `app.ERROR: AiService: ...`).
 
+### Délais du scoring (agent Go)
+
+Le scoring d'un marché fait au plus deux appels LLM côté agent :
+
+1. appel structuré (schéma JSON imposé), borné par `-score-structured-timeout`
+   (45 s par défaut, plafonné à `-call-timeout`) ;
+2. en cas d'échec, repli sur un appel texte, borné par `-call-timeout` (120 s).
+
+L'agent borne le job à la somme des deux (165 s par défaut) et annonce ce délai
+dans la réponse de `POST /score` (`{"job_id": …, "timeout": 165}`). À
+l'échéance, le job passe en `error` (« délai de l'agent dépassé ») même si
+l'appel LLM n'a pas rendu la main. `ScoringAgentService::waitForResult()`
+attend ce délai plus une marge de 20 s : aucun délai à reporter côté PHP quand
+on change ceux de l'agent.
+
+Comptage dans le résumé de `app:boamp:search` :
+
+- « Réponse IA non exploitable » : le LLM a répondu mais sa réponse n'est pas
+  du JSON exploitable (code d'erreur `parse` de l'agent) ;
+- « Scoring KO » : le scoring n'a pas abouti (API LLM en échec, délai de
+  l'agent dépassé, job perdu, agent injoignable). La raison s'affiche dans la
+  barre de progression et dans les logs, avec l'idweb.
+
 ## Dépannage
 
 | Symptôme | Cause probable | Action |
@@ -166,3 +189,6 @@ un log d'erreur est émis (`var/log/dev.log` → `app.ERROR: AiService: ...`).
 | "Erreur de connexion" dans le chat | Agent non démarré ou timeout | Vérifier que le container est UP et que l'agent écoute sur `:8000` (`docker logs nineboamp`) |
 | LLM répond avec les placeholders `{{...}}` non remplacés | Prompts non à jour | L'agent charge les prompts au démarrage ; redémarrer le container |
 | Rate limit dépassé | Trop de requêtes simultanées | Patienter ou ajuster `AI_MODEL` / `AI_BASE_URL` |
+| `scoring : échec de l'appel structuré, repli sur l'appel texte` dans les logs de l'agent | Le provider ne répond pas, ou mal, en mode JSON structuré | Sans gravité si le repli aboutit. Si c'est systématique, chaque scoring perd `-score-structured-timeout` : baisser ce délai |
+| `scoring KO : … context deadline exceeded` ou `délai de l'agent dépassé` | Le LLM n'a répondu ni en mode structuré ni en texte dans les délais | Durées réelles : `docker compose logs nineboamp \| grep 'kind=score'`. Si le provider est lent, augmenter `-call-timeout` |
+| `scoring KO : aucun statut final de l'agent après … s` | Job perdu (agent redémarré pendant le scoring) ou agent bloqué : l'agent garantit sinon un statut à l'échéance | `docker compose logs nineboamp` autour de l'heure du scoring ; redémarrer le container si l'agent ne répond plus |

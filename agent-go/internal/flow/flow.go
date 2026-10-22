@@ -5,6 +5,7 @@ package flow
 
 import (
 	"context"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -74,9 +75,14 @@ type ScoreSuccess struct {
 	ToolsUsed   []string         `json:"tools_used"`
 }
 
+// ScoreErrorParse marque un scoring dont le LLM a répondu, mais de façon
+// inexploitable — par opposition à un scoring qui n'a pas abouti.
+const ScoreErrorParse = "parse"
+
 // ScoreError est le payload result d'un scoring échoué.
 type ScoreError struct {
 	Error       string   `json:"error"`
+	Code        string   `json:"code,omitempty"`
 	RawResponse string   `json:"raw_response,omitempty"`
 	ToolsUsed   []string `json:"tools_used,omitempty"`
 }
@@ -93,6 +99,10 @@ type Config struct {
 	MaxIterations     int
 	CallTimeout       time.Duration
 	ReportCallTimeout time.Duration
+	// ScoreStructuredTimeout borne la tentative structurée du scoring : au-delà,
+	// on bascule sur l'appel texte (CallTimeout) plutôt que d'attendre en vain.
+	ScoreStructuredTimeout time.Duration
+	Logger                 *slog.Logger
 }
 
 // Service exécute les workflows de l'agent.
@@ -114,7 +124,20 @@ func New(client llm.ChatCompletionClient, p *prompts.Prompts, tools []llm.Tool, 
 	if cfg.ReportCallTimeout <= 0 {
 		cfg.ReportCallTimeout = 180 * time.Second
 	}
+	if cfg.ScoreStructuredTimeout <= 0 {
+		cfg.ScoreStructuredTimeout = 45 * time.Second
+	}
+	cfg.ScoreStructuredTimeout = min(cfg.ScoreStructuredTimeout, cfg.CallTimeout)
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
+	}
 	return &Service{client: client, prompts: p, tools: tools, cfg: cfg}
+}
+
+// ScoreTimeout est la durée maximale d'un scoring : la tentative structurée
+// puis le repli texte. Le serveur en fait le délai du job et l'annonce à PHP.
+func (s *Service) ScoreTimeout() time.Duration {
+	return s.cfg.ScoreStructuredTimeout + s.cfg.CallTimeout
 }
 
 // complete envoie un appel chat/completions avec timeout par appel,

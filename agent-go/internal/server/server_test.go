@@ -21,6 +21,8 @@ type stubRunner struct {
 	// chatBlock, si non nul, retarde la fin du chat : permet de tester des
 	// états intermédiaires sans course avec la goroutine du serveur.
 	chatBlock chan struct{}
+	// scoreBlock, si non nul, bloque le scoring en ignorant le contexte.
+	scoreBlock chan struct{}
 }
 
 func (s *stubRunner) Chat(_ context.Context, _ flow.ChatRequest) (string, any) {
@@ -31,6 +33,9 @@ func (s *stubRunner) Chat(_ context.Context, _ flow.ChatRequest) (string, any) {
 }
 
 func (s *stubRunner) Score(context.Context, flow.ScoreRequest) (string, any) {
+	if s.scoreBlock != nil {
+		<-s.scoreBlock
+	}
 	return flow.StatusDone, flow.ScoreSuccess{Score: 10, Priority: "C", Products: []map[string]any{}, ToolsUsed: []string{}}
 }
 
@@ -40,11 +45,17 @@ func (s *stubRunner) Report(context.Context, flow.ReportRequest) (string, any) {
 
 func newTestServer(t *testing.T, runner Runner) *httptest.Server {
 	t.Helper()
+	return newTestServerWith(t, Config{Runner: runner})
+}
+
+func newTestServerWith(t *testing.T, cfg Config) *httptest.Server {
+	t.Helper()
 	store, err := jobs.NewStore(t.TempDir(), 300*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(New(Config{Jobs: store, Runner: runner}))
+	cfg.Jobs = store
+	srv := httptest.NewServer(New(cfg))
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -166,6 +177,31 @@ func TestScoreAndReportEndpoints(t *testing.T) {
 	waitForStatus(t, srv.URL+"/report/result/"+jobID, "done")
 }
 
+func TestScoreAnnouncesItsTimeout(t *testing.T) {
+	srv := newTestServerWith(t, Config{Runner: &stubRunner{}, ScoreTimeout: 165 * time.Second})
+
+	_, body := post(t, srv.URL+"/score", `{"market_id": 1}`)
+
+	if body["timeout"] != float64(165) {
+		t.Errorf("timeout = %v, attendu 165", body["timeout"])
+	}
+}
+
+func TestScoreJobEndsInErrorAtItsDeadline(t *testing.T) {
+	runner := &stubRunner{scoreBlock: make(chan struct{})}
+	defer close(runner.scoreBlock)
+	srv := newTestServerWith(t, Config{Runner: runner, ScoreTimeout: 50 * time.Millisecond})
+
+	_, body := post(t, srv.URL+"/score", `{"market_id": 1}`)
+	jobID := body["job_id"].(string)
+	waitForStatus(t, srv.URL+"/score/result/"+jobID, "error")
+
+	_, job := get(t, srv.URL+"/score/result/"+jobID)
+	if errMsg, _ := job["result"].(map[string]any)["error"].(string); !strings.Contains(errMsg, "délai de l'agent dépassé") {
+		t.Errorf("result = %v", job["result"])
+	}
+}
+
 func waitForStatus(t *testing.T, url, want string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -174,7 +210,7 @@ func waitForStatus(t *testing.T, url, want string) {
 		if body["status"] == want {
 			return
 		}
-		if body["status"] == "error" {
+		if body["status"] == "error" && want != "error" {
 			t.Fatalf("statut error inattendu: %v", body)
 		}
 		if time.Now().After(deadline) {

@@ -12,6 +12,7 @@ use App\Repository\MarketRepository;
 use App\Repository\ProductRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\Console\Formatter\OutputFormatter;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 class BoampFinderService
@@ -22,6 +23,7 @@ class BoampFinderService
     private const MAX_KEYWORDS = 50;
     private const PAGE_SIZE = 100;
     private const MAX_RESULTS = 1000;
+    private const MAX_REASON_WIDTH = 200;
 
     // La recherche BOAMP porte sur des mots entiers : un acronyme ne trouve pas sa forme développée.
     private const KEYWORD_EXPANSIONS = [
@@ -175,7 +177,7 @@ class BoampFinderService
                         'idweb' => $idweb,
                         'error' => $e->getMessage(),
                     ]);
-                    $progress?->setMessage(sprintf('<error>%s — scoring KO</error>', $idweb));
+                    $progress?->setMessage(sprintf('<error>%s — scoring KO : %s</error>', $idweb, OutputFormatter::escape($this->shortReason($e->getMessage()))));
                     $progress?->advance();
                     sleep(2);
                     continue;
@@ -404,6 +406,16 @@ class BoampFinderService
     }
 
     /**
+     * Raison d'échec tenant sur une ligne de la barre de progression : une erreur de
+     * l'agent embarque parfois le corps HTTP complet (JSON, page HTML). Le message
+     * entier reste dans le log.
+     */
+    private function shortReason(string $message): string
+    {
+        return mb_strimwidth(trim(preg_replace('/\s+/', ' ', $message) ?? ''), 0, self::MAX_REASON_WIDTH, '…');
+    }
+
+    /**
      * @param Product[] $products
      *
      * @return array{Market, MarketProduct[]}|null
@@ -441,7 +453,8 @@ class BoampFinderService
         $this->em->flush();
         $marketId = $market->getId();
 
-        $jobId = $this->scoringAgent->startScoringJob(
+        // Lève avec sa raison si l'agent n'a pas créé le job : l'appelant l'affiche.
+        $started = $this->scoringAgent->startScoringJob(
             $marketId,
             $title ?? '',
             $buyer,
@@ -451,19 +464,21 @@ class BoampFinderService
             $productsData
         );
 
-        if (null === $jobId) {
-            $this->logger->warning('BoampFinderService: failed to start scoring job', ['idweb' => $market->getIdweb()]);
+        $jobId = $started['job_id'];
+        $job = $this->scoringAgent->waitForResult($jobId, $started['timeout']);
 
-            return null;
+        if ('done' !== $job['status']) {
+            // Le LLM a répondu, mais de façon inexploitable : « IA non exploitable ».
+            if ('parse' === ($job['code'] ?? null)) {
+                $this->logger->warning('BoampFinderService: réponse IA non exploitable', ['idweb' => $market->getIdweb(), 'job_id' => $jobId]);
+
+                return null;
+            }
+
+            // API en échec, délai dépassé, job perdu : l'appelant l'affiche avec sa raison.
+            throw new \RuntimeException(sprintf('%s (job %s)', $job['error'], $jobId));
         }
-
-        $result = $this->scoringAgent->waitForResult($jobId);
-
-        if (null === $result) {
-            $this->logger->warning('BoampFinderService: scoring job timeout or error', ['idweb' => $market->getIdweb(), 'job_id' => $jobId]);
-
-            return null;
-        }
+        $result = $job['result'];
 
         $market->setDescription($description);
         $market->setDeadline($deadlineRaw ? new \DateTime($deadlineRaw) : null);

@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/bornholm/genai/llm"
 )
@@ -23,9 +24,15 @@ func (s *Service) Score(ctx context.Context, req ScoreRequest) (status string, r
 		llm.NewMessage(llm.RoleUser, buildScoreUserPrompt(s.prompts.ScoringUser(), req)),
 	}
 
-	// 1. Tentative structurée : schéma JSON imposé au provider.
-	res, err := s.complete(ctx, s.cfg.CallTimeout, messages, nil, llm.WithJSONResponse(scoreResponseSchema()))
+	// 1. Tentative structurée : schéma JSON imposé au provider. Bornée plus
+	// court que l'appel texte : certains providers restent bloqués sur ce mode.
+	start := time.Now()
+	res, err := s.complete(ctx, s.cfg.ScoreStructuredTimeout, messages, nil, llm.WithJSONResponse(scoreResponseSchema()))
 	if err != nil {
+		// err.Error() : le TextHandler formate une erreur avec %+v, ce qui
+		// déroulerait les piles pkg/errors que genai attache à ses erreurs.
+		s.cfg.Logger.Warn("scoring : échec de l'appel structuré, repli sur l'appel texte",
+			"market_id", req.MarketID, "duration", time.Since(start).Round(time.Millisecond), "error", err.Error())
 		// 2. Repli : appel texte simple, comme l'agent Python.
 		res, err = s.complete(ctx, s.cfg.CallTimeout, messages, nil)
 		if err != nil {
@@ -38,6 +45,7 @@ func (s *Service) Score(ctx context.Context, req ScoreRequest) (status string, r
 	if parseErr != nil {
 		return StatusError, ScoreError{
 			Error:       "Impossible de parser la réponse JSON",
+			Code:        ScoreErrorParse,
 			RawResponse: truncateRunes(content, 500),
 			ToolsUsed:   []string{},
 		}

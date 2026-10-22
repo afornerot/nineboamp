@@ -97,21 +97,21 @@ class MarketController extends AbstractController
             ];
         }
 
-        $jobId = $scoringAgent->startScoringJob(
-            $market->getId(),
-            $market->getTitle() ?? '',
-            $market->getBuyer() ?? '',
-            $market->getDescription() ?? '',
-            $market->getAmount() ?? '',
-            $market->getDeadline()?->format('Y-m-d'),
-            $products
-        );
-
-        if (null === $jobId) {
-            return new JsonResponse(['error' => 'Impossible de démarrer le scoring'], 500);
+        try {
+            $job = $scoringAgent->startScoringJob(
+                $market->getId(),
+                $market->getTitle() ?? '',
+                $market->getBuyer() ?? '',
+                $market->getDescription() ?? '',
+                $market->getAmount() ?? '',
+                $market->getDeadline()?->format('Y-m-d'),
+                $products
+            );
+        } catch (\RuntimeException $e) {
+            return new JsonResponse(['error' => $e->getMessage()], 500);
         }
 
-        return new JsonResponse(['pending' => true, 'jobId' => $jobId]);
+        return new JsonResponse(['pending' => true, 'jobId' => $job['job_id']]);
     }
 
     #[Route('/user/market/{id}/rescore/poll/{jobId}', name: 'app_market_rescore_poll', methods: ['GET'])]
@@ -127,10 +127,16 @@ class MarketController extends AbstractController
             return new JsonResponse(['status' => 'pending']);
         }
 
+        // Le JS réessaie sur tout code HTTP d'erreur : réservé à l'échec passager du poll.
+        // Une erreur définitive part en 200 pour être affichée.
+        if ('unreachable' === $result['status']) {
+            return new JsonResponse(['status' => 'unreachable', 'error' => $result['error']], 503);
+        }
+
         if ('done' === $result['status']) {
             $market = $marketRepository->find($id);
             if (!$market) {
-                return new JsonResponse(['status' => 'error', 'error' => 'Marché introuvable'], 404);
+                return new JsonResponse(['status' => 'error', 'error' => 'Marché introuvable']);
             }
 
             $data = $result['result'] ?? [];
@@ -173,7 +179,7 @@ class MarketController extends AbstractController
             ]);
         }
 
-        return new JsonResponse(['status' => 'error', 'error' => $result['result']['error'] ?? 'Erreur inconnue'], 500);
+        return new JsonResponse(['status' => 'error', 'error' => $result['result']['error'] ?? 'Erreur inconnue']);
     }
 
     #[Route('/user/market/{id}/indexed-docs', name: 'app_market_indexed_docs', methods: ['GET'])]

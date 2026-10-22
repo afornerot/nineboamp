@@ -57,53 +57,40 @@ class BoampFinderServiceTest extends TestCase
 
     public function testScoreAndQualifyWithArrayDescriptorDoesNotCrash(): void
     {
-        $service = $this->buildService();
-
-        $product = (new Product())
-            ->setName('Planigram')
-            ->setKeywords('GED')
-            ->setFiche('# Fiche produit');
-
-        $details = [
-            'idweb' => '26-12345',
-            'objet' => 'Audit des systèmes d\'information',
-            'nomacheteur' => 'Ministère X',
-            'descripteur_libelle' => ['libelle' => 'Informatique', 'niveau' => 2],
-            'datelimitereponse' => '2026-12-31T12:00:00+00:00',
-            'montant' => '50000',
-            'code_departement' => '75',
-        ];
-
-        $reflection = new \ReflectionClass($service);
-        $method = $reflection->getMethod('scoreAndQualify');
-        $method->setAccessible(true);
-
-        $market = (new Market())->setIdweb('26-12345')->setTitle('Audit des systèmes d\'information');
-
-        $reflectionProp = new \ReflectionClass($service);
-        $emProp = $reflectionProp->getProperty('em');
-        $emProp->setAccessible(true);
-        $mockEm = $this->createMock(EntityManagerInterface::class);
-        $mockEm->method('flush')->willReturn(null);
-        $emProp->setValue($service, $mockEm);
-
-        $reflectionProp = new \ReflectionClass($service);
-        $scoringProp = $reflectionProp->getProperty('scoringAgent');
-        $scoringProp->setAccessible(true);
-        $mockScoring = $this->createMock(\App\Service\ScoringAgentService::class);
-        $mockScoring->method('startScoringJob')->willReturn('test-job-id');
-        $mockScoring->method('waitForResult')->willReturn([
+        $result = $this->scoreAndQualifyWith(['status' => 'done', 'result' => [
             'score' => 75,
             'priority' => 'B',
             'products' => [['name' => 'Planigram', 'score' => 75, 'relevance' => 'Bonne correspondance']],
-        ]);
-        $scoringProp->setValue($service, $mockScoring);
-
-        $result = $method->invoke($service, $market, $details, [$product]);
+        ]]);
 
         $this->assertNotNull($result);
         $this->assertArrayHasKey(0, $result);
         $this->assertArrayHasKey(1, $result);
+    }
+
+    public function testScoreAndQualifyUnusableAiResponseIsSkipped(): void
+    {
+        $result = $this->scoreAndQualifyWith(['status' => 'error', 'error' => 'Impossible de parser la réponse JSON', 'code' => 'parse']);
+
+        $this->assertNull($result);
+    }
+
+    public function testScoreAndQualifyAgentFailureCarriesItsReason(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Erreur de connexion à l\'API: context deadline exceeded (job test-job-id)');
+
+        $this->scoreAndQualifyWith(['status' => 'error', 'error' => 'Erreur de connexion à l\'API: context deadline exceeded', 'code' => null]);
+    }
+
+    public function testShortReasonFitsOnOneLine(): void
+    {
+        $reason = $this->callPrivate($this->buildService(), 'shortReason', "Erreur de connexion à l'API: rate limit\nhttp 429: " . str_repeat('x', 500));
+
+        $this->assertStringNotContainsString("\n", $reason);
+        $this->assertStringStartsWith("Erreur de connexion à l'API: rate limit http 429: ", $reason);
+        $this->assertStringEndsWith('…', $reason);
+        $this->assertSame(200, mb_strwidth($reason));
     }
 
     public function testRunSkipsAlreadyScoredMarketsBeforeFillingSlots(): void
@@ -208,6 +195,52 @@ class BoampFinderServiceTest extends TestCase
     private function callPrivate(BoampFinderService $service, string $method, mixed ...$args): mixed
     {
         return (new \ReflectionMethod($service, $method))->invoke($service, ...$args);
+    }
+
+    /**
+     * Lance scoreAndQualify() avec un agent qui annonce 165 s et rend $job.
+     */
+    private function scoreAndQualifyWith(array $job): ?array
+    {
+        $service = $this->buildService();
+
+        $product = (new Product())
+            ->setName('Planigram')
+            ->setKeywords('GED')
+            ->setFiche('# Fiche produit');
+
+        $details = [
+            'idweb' => '26-12345',
+            'objet' => 'Audit des systèmes d\'information',
+            'nomacheteur' => 'Ministère X',
+            'descripteur_libelle' => ['libelle' => 'Informatique', 'niveau' => 2],
+            'datelimitereponse' => '2026-12-31T12:00:00+00:00',
+            'montant' => '50000',
+            'code_departement' => '75',
+        ];
+
+        $reflection = new \ReflectionClass($service);
+        $method = $reflection->getMethod('scoreAndQualify');
+        $method->setAccessible(true);
+
+        $market = (new Market())->setIdweb('26-12345')->setTitle('Audit des systèmes d\'information');
+        (new \ReflectionProperty(Market::class, 'id'))->setValue($market, 1);
+
+        $reflectionProp = new \ReflectionClass($service);
+        $emProp = $reflectionProp->getProperty('em');
+        $emProp->setAccessible(true);
+        $mockEm = $this->createMock(EntityManagerInterface::class);
+        $emProp->setValue($service, $mockEm);
+
+        $reflectionProp = new \ReflectionClass($service);
+        $scoringProp = $reflectionProp->getProperty('scoringAgent');
+        $scoringProp->setAccessible(true);
+        $mockScoring = $this->createMock(\App\Service\ScoringAgentService::class);
+        $mockScoring->method('startScoringJob')->willReturn(['job_id' => 'test-job-id', 'timeout' => 165]);
+        $mockScoring->expects($this->once())->method('waitForResult')->with('test-job-id', 165)->willReturn($job);
+        $scoringProp->setValue($service, $mockScoring);
+
+        return $method->invoke($service, $market, $details, [$product]);
     }
 
     private function buildService(

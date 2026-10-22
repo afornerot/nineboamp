@@ -5,7 +5,9 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"time"
 
@@ -26,14 +28,17 @@ type Config struct {
 	Jobs       *jobs.Store
 	Runner     Runner
 	JobTimeout time.Duration
-	Logger     *slog.Logger
+	// ScoreTimeout borne un job de scoring (défaut : JobTimeout).
+	ScoreTimeout time.Duration
+	Logger       *slog.Logger
 }
 
 type handler struct {
-	jobs       *jobs.Store
-	runner     Runner
-	jobTimeout time.Duration
-	logger     *slog.Logger
+	jobs         *jobs.Store
+	runner       Runner
+	jobTimeout   time.Duration
+	scoreTimeout time.Duration
+	logger       *slog.Logger
 }
 
 // New construit le handler HTTP complet (routes + CORS + recovery).
@@ -46,11 +51,16 @@ func New(cfg Config) http.Handler {
 	if jobTimeout == 0 {
 		jobTimeout = 10 * time.Minute
 	}
+	scoreTimeout := cfg.ScoreTimeout
+	if scoreTimeout == 0 {
+		scoreTimeout = jobTimeout
+	}
 	h := &handler{
-		jobs:       cfg.Jobs,
-		runner:     cfg.Runner,
-		jobTimeout: jobTimeout,
-		logger:     logger,
+		jobs:         cfg.Jobs,
+		runner:       cfg.Runner,
+		jobTimeout:   jobTimeout,
+		scoreTimeout: scoreTimeout,
+		logger:       logger,
 	}
 
 	mux := http.NewServeMux()
@@ -75,7 +85,7 @@ func (h *handler) startChat(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	h.start(w, r, "chat", func(ctx context.Context, jobID string) (string, any) {
+	h.start(w, r, "chat", h.jobTimeout, func(ctx context.Context, jobID string) (string, any) {
 		return h.runner.Chat(ctx, req)
 	})
 }
@@ -85,7 +95,7 @@ func (h *handler) startScore(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	h.start(w, r, "score", func(ctx context.Context, jobID string) (string, any) {
+	h.start(w, r, "score", h.scoreTimeout, func(ctx context.Context, jobID string) (string, any) {
 		return h.runner.Score(ctx, req)
 	})
 }
@@ -95,14 +105,20 @@ func (h *handler) startReport(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) {
 		return
 	}
-	h.start(w, r, "report", func(ctx context.Context, jobID string) (string, any) {
+	h.start(w, r, "report", h.jobTimeout, func(ctx context.Context, jobID string) (string, any) {
 		return h.runner.Report(ctx, req)
 	})
 }
 
+type outcome struct {
+	status string
+	result any
+}
+
 // start crée le job (pending), lance le workflow en goroutine et renvoie
-// immédiatement {job_id} — exactement comme le subprocess Python.
-func (h *handler) start(w http.ResponseWriter, r *http.Request, kind string, run func(ctx context.Context, jobID string) (string, any)) {
+// immédiatement {job_id, timeout}. Au plus tard après timeout, le job a un
+// statut final : l'appelant peut attendre ce délai (en secondes) sans deviner.
+func (h *handler) start(w http.ResponseWriter, r *http.Request, kind string, timeout time.Duration, run func(ctx context.Context, jobID string) (string, any)) {
 	h.jobs.Cleanup()
 
 	jobID := uuid.New().String()
@@ -112,26 +128,41 @@ func (h *handler) start(w http.ResponseWriter, r *http.Request, kind string, run
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), h.jobTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), timeout)
 	go func() {
 		defer cancel()
-		defer func() {
-			if rec := recover(); rec != nil {
-				h.logger.Error("panic dans le workflow", "kind", kind, "job_id", jobID, "panic", rec)
-				h.jobs.Save(jobID, jobs.StatusError, map[string]any{"error": "Erreur interne"})
-			}
-		}()
 
 		start := time.Now()
-		status, result := run(ctx, jobID)
-		if err := h.jobs.Save(jobID, status, result); err != nil {
+		done := make(chan outcome, 1)
+		go func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					h.logger.Error("panic dans le workflow", "kind", kind, "job_id", jobID, "panic", rec)
+					done <- outcome{jobs.StatusError, map[string]any{"error": "Erreur interne"}}
+				}
+			}()
+			status, result := run(ctx, jobID)
+			done <- outcome{status, result}
+		}()
+
+		var out outcome
+		select {
+		case out = <-done:
+		case <-ctx.Done():
+			// Le workflow ne rend pas la main à temps (retries du client LLM qui
+			// ignorent le contexte…) : on n'attend pas son résultat tardif.
+			h.logger.Warn("job interrompu : délai dépassé", "kind", kind, "job_id", jobID, "timeout", timeout)
+			out = outcome{jobs.StatusError, map[string]any{"error": fmt.Sprintf("délai de l'agent dépassé (%s)", timeout)}}
+		}
+
+		if err := h.jobs.Save(jobID, out.status, out.result); err != nil {
 			h.logger.Error("écriture du résultat impossible", "kind", kind, "job_id", jobID, "error", err)
 			return
 		}
-		h.logger.Info("job terminé", "kind", kind, "job_id", jobID, "status", status, "duration", time.Since(start).Round(time.Millisecond))
+		h.logger.Info("job terminé", "kind", kind, "job_id", jobID, "status", out.status, "duration", time.Since(start).Round(time.Millisecond))
 	}()
 
-	writeJSON(w, http.StatusOK, map[string]any{"job_id": jobID})
+	writeJSON(w, http.StatusOK, map[string]any{"job_id": jobID, "timeout": int(math.Ceil(timeout.Seconds()))})
 }
 
 // result lit un job ; absent/invalide → not_found (comme load_job → None).

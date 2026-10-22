@@ -279,6 +279,9 @@ func TestScoreParseFailure(t *testing.T) {
 	if scoreErr.RawResponse != "désolé je ne peux pas" {
 		t.Errorf("raw_response = %q", scoreErr.RawResponse)
 	}
+	if scoreErr.Code != ScoreErrorParse {
+		t.Errorf("code = %q, attendu %q", scoreErr.Code, ScoreErrorParse)
+	}
 }
 
 func TestScoreAPIErrorBothCalls(t *testing.T) {
@@ -295,6 +298,9 @@ func TestScoreAPIErrorBothCalls(t *testing.T) {
 	}
 	if !strings.Contains(result.(ScoreError).Error, "boom texte") {
 		t.Errorf("error = %q", result.(ScoreError).Error)
+	}
+	if result.(ScoreError).Code == ScoreErrorParse {
+		t.Error("un échec d'API ne doit pas passer pour une réponse inexploitable")
 	}
 }
 
@@ -370,5 +376,59 @@ func TestCompleteUsesCallTimeout(t *testing.T) {
 
 	if _, err := svc.complete(context.Background(), svc.cfg.CallTimeout, []llm.Message{llm.NewMessage(llm.RoleUser, "hi")}, nil); err != nil {
 		t.Errorf("complete: %v", err)
+	}
+}
+
+// hangingStructuredClient reste bloqué sur l'appel structuré jusqu'à l'expiration
+// de son contexte, comme un provider qui ne répond pas en mode response_format.
+type hangingStructuredClient struct {
+	fakeClient
+}
+
+func (c *hangingStructuredClient) ChatCompletion(ctx context.Context, opts ...llm.ChatCompletionOptionFunc) (llm.ChatCompletionResponse, error) {
+	if llm.NewChatCompletionOptions(opts...).ResponseFormat != llm.ResponseFormatDefault {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return c.fakeClient.ChatCompletion(ctx, opts...)
+}
+
+func TestScoreStructuredTimeoutFallsBackQuickly(t *testing.T) {
+	client := &hangingStructuredClient{fakeClient{queue: []fakeCall{
+		assistant(`{"score": 55, "priority": "C", "explanation": "OK", "products": []}`),
+	}}}
+	svc := New(client, testPrompts(t), nil, Config{
+		CallTimeout:            5 * time.Second,
+		ScoreStructuredTimeout: 20 * time.Millisecond,
+	})
+
+	start := time.Now()
+	status, result := svc.Score(context.Background(), ScoreRequest{})
+
+	if status != StatusDone || result.(ScoreSuccess).Score != 55 {
+		t.Fatalf("status = %q, result = %+v", status, result)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("repli après %s : la tentative structurée doit être bornée par ScoreStructuredTimeout, pas CallTimeout", elapsed)
+	}
+}
+
+func TestScoreStructuredTimeoutDefault(t *testing.T) {
+	svc := newService(t, &fakeClient{}, nil, Config{})
+	if svc.cfg.ScoreStructuredTimeout != 45*time.Second {
+		t.Errorf("ScoreStructuredTimeout par défaut = %s", svc.cfg.ScoreStructuredTimeout)
+	}
+}
+
+func TestScoreTimeoutCoversBothCalls(t *testing.T) {
+	svc := New(&fakeClient{}, testPrompts(t), nil, Config{CallTimeout: 120 * time.Second})
+	if got := svc.ScoreTimeout(); got != 165*time.Second {
+		t.Errorf("ScoreTimeout = %s, attendu 45s + 120s", got)
+	}
+
+	// La tentative structurée ne dépasse jamais l'appel texte.
+	svc = New(&fakeClient{}, testPrompts(t), nil, Config{CallTimeout: 30 * time.Second, ScoreStructuredTimeout: 45 * time.Second})
+	if got := svc.ScoreTimeout(); got != 60*time.Second {
+		t.Errorf("ScoreTimeout = %s, attendu 30s + 30s", got)
 	}
 }

@@ -26,7 +26,10 @@ services:
     container_name: nineboamp
     restart: unless-stopped
     image: reg.cadoles.com/envole/nineboamp
-    user: "${UID:-1000}:102"
+    # UID = utilisateur hôte (accès aux volumes montés), GID = groupe apache (101)
+    # du conteneur : le GID 102 n'existe pas dans l'image et empechait httpd d'écrire
+    # dans /var/log/apache2 -> apache mourait en boucle de redémarrage.
+    user: "${UID:-1000}:${GID:-101}"
     depends_on:
       mariadb:
         condition: service_healthy

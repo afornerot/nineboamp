@@ -61,6 +61,9 @@ class BoampFixDescriptionsCommand extends Command
 
         $updated = 0;
         $failed = 0;
+        // Corrigés mais toujours scorés sur l'ancienne description ; leur description
+        // étant désormais lisible, cette commande ne les sélectionnera plus.
+        $staleScores = [];
 
         foreach ($markets as $market) {
             $idweb = $market->getIdweb();
@@ -95,12 +98,18 @@ class BoampFixDescriptionsCommand extends Command
                     $this->finder->rescoreMarket($market);
                 } catch (\Throwable $e) {
                     $io->warning(sprintf('description corrigée, requalification échouée : %s', $e->getMessage()));
+                    if (null !== $market->getScore()) {
+                        $staleScores[] = $idweb;
+                    }
                     $failed++;
                     continue;
                 }
                 $io->success(sprintf('corrigé et requalifié (%d/100, priorité %s)', $market->getScore() ?? 0, $market->getPriority() ?? '?'));
             } else {
                 $io->success(sprintf('mis à jour (%d chars)', mb_strlen($description)));
+                if (null !== $market->getScore()) {
+                    $staleScores[] = $idweb;
+                }
             }
 
             $updated++;
@@ -108,6 +117,14 @@ class BoampFixDescriptionsCommand extends Command
 
         $io->newLine();
         $io->info(sprintf('Résumé: %d mis à jour, %d échoué(s)', $updated, $failed));
+
+        if ([] !== $staleScores) {
+            $io->warning(sprintf(
+                "%d marché(s) gardent le score calculé sur l'ancienne description : les requalifier depuis leur fiche (bouton « Requalifier »).\n%s",
+                count($staleScores),
+                implode(', ', $staleScores),
+            ));
+        }
 
         return Command::SUCCESS;
     }

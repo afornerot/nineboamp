@@ -895,12 +895,8 @@ class BoampFinderService
             throw new \RuntimeException('Aucun produit en base.');
         }
 
-        // Supprimer les MarketProduct existants
+        $status = $market->getStatus();
         $existing = $this->marketProductRepository->findByMarket($market->getId());
-        foreach ($existing as $mp) {
-            $market->removeMarketProduct($mp);
-            $this->em->remove($mp);
-        }
 
         $scored = $this->scoreAndQualify($market, $details, $products);
         if (null === $scored) {
@@ -908,6 +904,18 @@ class BoampFinderService
         }
 
         [$market, $marketProducts] = $scored;
+
+        // Retirés seulement une fois le nouveau scoring obtenu : un agent indisponible
+        // laisse le marché tel qu'il était.
+        foreach ($existing as $mp) {
+            $market->removeMarketProduct($mp);
+            $this->em->remove($mp);
+        }
+        // Le statut posé par l'utilisateur (go, nogo, répondu…) survit à la requalification.
+        if (Market::STATUS_DETECTED !== $status) {
+            $market->setStatus($status);
+        }
+
         $this->em->persist($market);
         foreach ($marketProducts as $mp) {
             $this->em->persist($mp);

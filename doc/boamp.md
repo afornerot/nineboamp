@@ -136,7 +136,11 @@ Le champ `description` envoyé au LLM dépend du schéma de l'avis (clé racine 
 À défaut, on prend les descripteurs BOAMP (`descripteur_libelle`, simples
 étiquettes comme "Formation", joints par des virgules), puis l'objet de l'avis.
 `bin/console app:boamp:fix-descriptions [--dry-run] [--rescore]` corrige les
-marchés enregistrés sans description exploitable.
+marchés enregistrés sans description exploitable. `--rescore` les requalifie
+dans la foulée, sans toucher au statut choisi par l'utilisateur ni aux produits
+associés si l'agent échoue. Sans cette option, le score reste celui de l'ancienne
+description : la commande liste ces marchés, à requalifier depuis leur fiche, car
+elle ne les sélectionnera plus.
 
 Ensuite, `BoampFinderService::scoreAndQualify()` appelle le LLM pour évaluer
 la correspondance avec chaque produit du catalogue.

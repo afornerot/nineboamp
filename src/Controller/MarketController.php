@@ -2,6 +2,7 @@
 
 namespace App\Controller;
 
+use App\Controller\Trait\AgentJobPollTrait;
 use App\Controller\Trait\LayoutRenderTrait;
 use App\Entity\Market;
 use App\Entity\MarketProduct;
@@ -21,6 +22,7 @@ use Symfony\Component\Routing\Attribute\Route;
 
 class MarketController extends AbstractController
 {
+    use AgentJobPollTrait;
     use LayoutRenderTrait;
 
     public function __construct(
@@ -117,29 +119,15 @@ class MarketController extends AbstractController
     #[Route('/user/market/{id}/rescore/poll/{jobId}', name: 'app_market_rescore_poll', methods: ['GET'])]
     public function pollRescore(int $id, string $jobId, MarketRepository $marketRepository, ScoringAgentService $scoringAgent, EntityManagerInterface $em): JsonResponse
     {
-        $result = $scoringAgent->getScoringResult($jobId);
+        $job = $scoringAgent->getScoringResult($jobId);
 
-        if ('not_found' === $result['status']) {
-            return new JsonResponse(['status' => 'not_found', 'error' => 'Job non trouvé']);
-        }
-
-        if ('pending' === $result['status']) {
-            return new JsonResponse(['status' => 'pending']);
-        }
-
-        // Le JS réessaie sur tout code HTTP d'erreur : réservé à l'échec passager du poll.
-        // Une erreur définitive part en 200 pour être affichée.
-        if ('unreachable' === $result['status']) {
-            return new JsonResponse(['status' => 'unreachable', 'error' => $result['error']], 503);
-        }
-
-        if ('done' === $result['status']) {
+        if ($job->isDone()) {
             $market = $marketRepository->find($id);
             if (!$market) {
                 return new JsonResponse(['status' => 'error', 'error' => 'Marché introuvable']);
             }
 
-            $data = $result['result'] ?? [];
+            $data = $job->result;
 
             $market->setScore($data['score'] ?? 0);
             $market->setPriority($data['priority'] ?? 'C');
@@ -179,7 +167,7 @@ class MarketController extends AbstractController
             ]);
         }
 
-        return new JsonResponse(['status' => 'error', 'error' => $result['result']['error'] ?? 'Erreur inconnue']);
+        return $this->agentJobResponse($job);
     }
 
     #[Route('/user/market/{id}/indexed-docs', name: 'app_market_indexed_docs', methods: ['GET'])]

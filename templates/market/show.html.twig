@@ -569,7 +569,7 @@
             } else if (data.status === 'error') {
                 var contentDiv = assistantDiv.querySelector('.chat-msg-content');
                 if (contentDiv) {
-                    contentDiv.innerHTML = '<em style="color: red;">Erreur: ' + escapeHtml(data.result?.error || 'Une erreur est survenue') + '</em>';
+                    contentDiv.innerHTML = '<em style="color: red;">Erreur: ' + escapeHtml(data.error || 'Une erreur est survenue') + '</em>';
                 }
                 setLoading(false);
             } else {
@@ -654,7 +654,7 @@
                 alert('Erreur lors du scoring: ' + (data.error || 'Une erreur est survenue'));
                 rescoreBtn.disabled = false;
                 rescoreBtn.innerHTML = rescoreOriginalHtml;
-            } else if (data.status === 'pending' || data.status === 'not_found') {
+            } else if (data.status === 'pending') {
                 setTimeout(function() { pollRescore(jobId); }, 2000);
             }
         })

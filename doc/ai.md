@@ -77,6 +77,21 @@ Points clés :
   texte, valeurs manquantes → défauts `score: 0`, `priority: C`).
 - Boucle d'outils bornée à **10 itérations**.
 
+### Suivi des jobs côté PHP
+
+`AgentJobClient` est le seul client des jobs de l'agent (`start`, `fetch`,
+`wait`) : `AgentService` (chat), `ScoringAgentService` et `MarketReportService`
+ne font que lui passer leur payload. Il rend un `AgentJobResult`, que les
+endpoints de poll (chat, rescore, rapport) traduisent tous de la même façon
+pour le JS :
+
+| Statut | Sens | Réponse au JS |
+|---|---|---|
+| `done` | Résultat disponible | Propre à chaque endpoint |
+| `pending` | Job en cours | 200 `pending` : le JS interroge à nouveau |
+| `unreachable` | Le poll a échoué (agent injoignable) ; le job continue peut-être | 503 : le JS réessaie |
+| `error`, `not_found`, `timeout` | Échec définitif (`not_found` : résultat expiré ou agent redémarré) | 200 `error` avec la raison, affichée à l'utilisateur |
+
 ### Développement
 
 ```bash
@@ -170,8 +185,8 @@ Le scoring d'un marché fait au plus deux appels LLM côté agent :
 L'agent borne le job à la somme des deux (165 s par défaut) et annonce ce délai
 dans la réponse de `POST /score` (`{"job_id": …, "timeout": 165}`). À
 l'échéance, le job passe en `error` (« délai de l'agent dépassé ») même si
-l'appel LLM n'a pas rendu la main. `ScoringAgentService::waitForResult()`
-attend ce délai plus une marge de 20 s : aucun délai à reporter côté PHP quand
+l'appel LLM n'a pas rendu la main. `AgentJobClient::wait()` (via
+`ScoringAgentService::waitForResult()`) attend ce délai plus une marge de 20 s : aucun délai à reporter côté PHP quand
 on change ceux de l'agent.
 
 Comptage dans le résumé de `app:boamp:search` :

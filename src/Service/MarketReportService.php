@@ -11,18 +11,12 @@ use App\Repository\ProductRepository;
 
 /**
  * Market Report Service - Builds the payload and calls the agent
- * Python endpoint to generate a positioning report for a given market.
+ * endpoint (through AgentJobClient) to generate a positioning report for a given market.
  */
 class MarketReportService
 {
-    private const AGENT_URL = 'http://127.0.0.1:8000';
-
-    private const TIMEOUT_START = 10;
-    private const TIMEOUT_POLL = 10;
-
     public function __construct(
-        private \Symfony\Contracts\HttpClient\HttpClientInterface $httpClient,
-        private \Psr\Log\LoggerInterface $logger,
+        private AgentJobClient $agentJobs,
         private MarketChatMessageRepository $chatRepo,
         private ProductRepository $productRepository,
     ) {
@@ -31,65 +25,23 @@ class MarketReportService
     /**
      * Start a report generation job.
      *
-     * @return string|null Job ID or null on error
+     * @return string|null Job ID or null on error (raison journalisée par AgentJobClient)
      */
     public function startReport(Market $market): ?string
     {
-        $payload = $this->buildPayload($market);
-
         try {
-            $response = $this->httpClient->request('POST', self::AGENT_URL . '/report', [
-                'json' => $payload,
-                'timeout' => self::TIMEOUT_START,
-            ]);
-
-            $data = $response->toArray();
-
-            return $data['job_id'] ?? null;
-        } catch (\Throwable $e) {
-            $this->logger->error('MarketReportService: failed to start report job', [
-                'error' => $e->getMessage(),
-                'market_id' => $market->getId(),
-            ]);
-
+            return $this->agentJobs->start(AgentJobClient::REPORT, $this->buildPayload($market))['job_id'];
+        } catch (\RuntimeException) {
             return null;
         }
     }
 
     /**
      * Get report job result (single check, no polling).
-     *
-     * @return array{status: string, result?: array}
      */
-    public function getResult(string $jobId): array
+    public function getResult(string $jobId): AgentJobResult
     {
-        try {
-            $response = $this->httpClient->request('GET', self::AGENT_URL . '/report/result/' . $jobId, [
-                'timeout' => self::TIMEOUT_POLL,
-            ]);
-
-            return $response->toArray();
-        } catch (\Throwable $e) {
-            $this->logger->warning('MarketReportService: failed to get report result', [
-                'error' => $e->getMessage(),
-                'job_id' => $jobId,
-            ]);
-
-            return ['status' => 'error', 'result' => ['error' => $e->getMessage()]];
-        }
-    }
-
-    public function isHealthy(): bool
-    {
-        try {
-            $response = $this->httpClient->request('GET', self::AGENT_URL . '/health', [
-                'timeout' => 5,
-            ]);
-
-            return 200 === $response->getStatusCode();
-        } catch (\Throwable) {
-            return false;
-        }
+        return $this->agentJobs->fetch(AgentJobClient::REPORT, $jobId);
     }
 
     /**

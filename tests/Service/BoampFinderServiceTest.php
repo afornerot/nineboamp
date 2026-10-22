@@ -8,6 +8,7 @@ use App\Entity\MarketProduct;
 use App\Repository\MarketProductRepository;
 use App\Repository\MarketRepository;
 use App\Repository\ProductRepository;
+use App\Service\AgentJobResult;
 use App\Service\AiService;
 use App\Service\BoampApiService;
 use App\Service\BoampFinderService;
@@ -113,11 +114,11 @@ class BoampFinderServiceTest extends TestCase
 
     public function testScoreAndQualifyWithArrayDescriptorDoesNotCrash(): void
     {
-        $result = $this->scoreAndQualifyWith(['status' => 'done', 'result' => [
+        $result = $this->scoreAndQualifyWith(new AgentJobResult(AgentJobResult::DONE, [
             'score' => 75,
             'priority' => 'B',
             'products' => [['name' => 'Planigram', 'score' => 75, 'relevance' => 'Bonne correspondance']],
-        ]]);
+        ]));
 
         $this->assertNotNull($result);
         $this->assertArrayHasKey(0, $result);
@@ -126,7 +127,7 @@ class BoampFinderServiceTest extends TestCase
 
     public function testScoreAndQualifyUnusableAiResponseIsSkipped(): void
     {
-        $result = $this->scoreAndQualifyWith(['status' => 'error', 'error' => 'Impossible de parser la réponse JSON', 'code' => 'parse']);
+        $result = $this->scoreAndQualifyWith(new AgentJobResult(AgentJobResult::ERROR, ['error' => 'Impossible de parser la réponse JSON', 'code' => 'parse'], 'Impossible de parser la réponse JSON'));
 
         $this->assertNull($result);
     }
@@ -136,7 +137,7 @@ class BoampFinderServiceTest extends TestCase
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('Erreur de connexion à l\'API: context deadline exceeded (job test-job-id)');
 
-        $this->scoreAndQualifyWith(['status' => 'error', 'error' => 'Erreur de connexion à l\'API: context deadline exceeded', 'code' => null]);
+        $this->scoreAndQualifyWith(new AgentJobResult(AgentJobResult::ERROR, error: 'Erreur de connexion à l\'API: context deadline exceeded'));
     }
 
     public function testShortReasonFitsOnOneLine(): void
@@ -251,7 +252,7 @@ class BoampFinderServiceTest extends TestCase
     public function testRescoreMarketKeepsProductsWhenAgentFails(): void
     {
         $scoringAgent = $this->createMock(ScoringAgentService::class);
-        $scoringAgent->method('startScoringJob')->willReturn(null);
+        $scoringAgent->method('startScoringJob')->willThrowException(new \RuntimeException('job de scoring non démarré : Connection refused'));
         $em = $this->createMock(EntityManagerInterface::class);
         $em->expects($this->never())->method('remove');
 
@@ -270,12 +271,12 @@ class BoampFinderServiceTest extends TestCase
     public function testRescoreMarketReplacesProductsAndKeepsUserStatus(): void
     {
         $scoringAgent = $this->createMock(ScoringAgentService::class);
-        $scoringAgent->method('startScoringJob')->willReturn('job-1');
-        $scoringAgent->method('waitForResult')->willReturn([
+        $scoringAgent->method('startScoringJob')->willReturn(['job_id' => 'job-1', 'timeout' => 165]);
+        $scoringAgent->method('waitForResult')->willReturn(new AgentJobResult(AgentJobResult::DONE, [
             'score' => 80,
             'priority' => 'A',
             'products' => [['name' => 'corpus', 'score' => 80]],
-        ]);
+        ]));
         $em = $this->createMock(EntityManagerInterface::class);
 
         [$service, $market, $old] = $this->buildRescore($scoringAgent, $em);
@@ -297,7 +298,7 @@ class BoampFinderServiceTest extends TestCase
     /**
      * Lance scoreAndQualify() avec un agent qui annonce 165 s et rend $job.
      */
-    private function scoreAndQualifyWith(array $job): ?array
+    private function scoreAndQualifyWith(AgentJobResult $job): ?array
     {
         $service = $this->buildService();
 

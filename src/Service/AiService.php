@@ -157,13 +157,21 @@ class AiService
                 return [];
             }
 
+            // Gemini renvoie ses erreurs enveloppées dans une liste : [{"error": {...}}]
+            if (isset($data[0]) && is_array($data[0])) {
+                $data = $data[0];
+            }
+
             $httpCode = $response->getStatusCode();
-            if (429 === $httpCode) {
-                $errorMsg = is_string($data['error'] ?? '') ? $data['error'] : (string) ($data['error']['message'] ?? '');
+            // 429 = rate limit, 503 = modèle surchargé (transitoire)
+            if (429 === $httpCode || 503 === $httpCode) {
+                $error = $data['error'] ?? '';
+                $errorMsg = is_string($error) ? $error : (string) ($error['message'] ?? '');
                 $retryAfter = $this->parseRetryAfter($response, $errorMsg);
 
                 if ($attempt < self::MAX_RETRIES) {
-                    $this->logger->warning('AiService: rate limit, retry après délai', [
+                    $this->logger->warning('AiService: rate limit / surcharge, retry après délai', [
+                        'http_code' => $httpCode,
                         'attempt' => $attempt,
                         'retry_after' => $retryAfter,
                         'error' => $errorMsg,
@@ -172,11 +180,7 @@ class AiService
                     continue;
                 }
 
-                $this->logger->error('AiService: rate limit après '.self::MAX_RETRIES.' tentatives', ['error' => $errorMsg]);
-            }
-
-            if (isset($data[0]) && is_array($data[0])) {
-                $data = $data[0];
+                $this->logger->error('AiService: rate limit / surcharge après '.self::MAX_RETRIES.' tentatives', ['http_code' => $httpCode, 'error' => $errorMsg]);
             }
 
             return (array) $data;

@@ -10,6 +10,12 @@ services:
       MYSQL_PASSWORD: changeme
     volumes:
       - ./volume/mariadb:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   nineboamp:
     build:
@@ -20,7 +26,8 @@ services:
     image: reg.cadoles.com/envole/nineboamp
     user: "${UID:-1000}:102"
     depends_on:
-      - mariadb
+      mariadb:
+        condition: service_healthy
     ports:
       - "8024:80"
     volumes:

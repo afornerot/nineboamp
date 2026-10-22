@@ -2,7 +2,7 @@
 purpose: user
 variant: extract
 temperature: 0.0
-max_tokens: 2048
+max_tokens: 8192
 ---
 
 Tâche : extraire les éléments suivants depuis cette fiche produit.

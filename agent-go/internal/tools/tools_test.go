@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -85,6 +86,131 @@ func TestAmoxtliSearchFailureReturnsStderr(t *testing.T) {
 	if !strings.Contains(got, "boom") {
 		t.Errorf("stderr attendu dans l'erreur: %q", got)
 	}
+}
+
+func TestLimitSearchOutputUnderBudgetUnchanged(t *testing.T) {
+	out := `{"results": [{"source": "file:///cctp.txt", "sections": [{"id": "a", "content": "court"}]}]}`
+	if got := limitSearchOutput(out); got != out {
+		t.Errorf("sortie modifiée sous le budget: %q", got)
+	}
+}
+
+func TestLimitSearchOutputTruncatesHugeSections(t *testing.T) {
+	// Reproduit un tableur converti : une section unique de plusieurs Mo,
+	// suivie d'un document normal.
+	huge := strings.Repeat(`"",`, 1_000_000)
+	payload := map[string]any{"results": []any{
+		map[string]any{"source": "file:///bpu.txt", "sections": []any{map[string]any{"id": "x", "content": huge}}},
+		map[string]any{"source": "file:///cctp.txt", "sections": []any{map[string]any{"id": "y", "content": "Article 1 <délai>"}}},
+	}}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := limitSearchOutput(string(raw))
+
+	decoded := decodeLimited(t, got)
+	if !decoded.Truncated || len(decoded.Results) != 2 {
+		t.Fatalf("truncated=%v, %d résultat(s)", decoded.Truncated, len(decoded.Results))
+	}
+	if c := decoded.Results[0].Sections[0].Content; !strings.HasSuffix(c, truncatedMarker) {
+		t.Errorf("section énorme non signalée comme tronquée: …%q", c[len(c)-20:])
+	}
+	if c := decoded.Results[1].Sections[0].Content; c != "Article 1 <délai>" {
+		t.Errorf("section courte altérée: %q", c)
+	}
+}
+
+func TestLimitSearchOutputCountsJSONEscaping(t *testing.T) {
+	// Contenu CSV : chaque guillemet et chaque saut de ligne double à
+	// l'encodage, le budget doit porter sur le JSON produit.
+	csv := strings.Repeat(`"Lot 1","12",""`+"\n", 400)
+	results := make([]any, 0, 5)
+	for d := range 5 {
+		sections := make([]any, 0, 4)
+		for s := range 4 {
+			sections = append(sections, map[string]any{"id": fmt.Sprintf("d%d-s%d", d, s), "content": csv})
+		}
+		results = append(results, map[string]any{"source": fmt.Sprintf("file:///bpu%d.txt", d), "sections": sections})
+	}
+	raw, err := json.Marshal(map[string]any{"results": results})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	decoded := decodeLimited(t, limitSearchOutput(string(raw)))
+	if !decoded.Truncated {
+		t.Error("truncated attendu")
+	}
+}
+
+func TestLimitSearchOutputCountsEmptySections(t *testing.T) {
+	sections := make([]any, 0, 3000)
+	for i := range 3000 {
+		sections = append(sections, map[string]any{"id": fmt.Sprintf("section-%04d", i), "content": ""})
+	}
+	raw, err := json.Marshal(map[string]any{"results": []any{
+		map[string]any{"source": "file:///vide.txt", "sections": sections},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	decoded := decodeLimited(t, limitSearchOutput(string(raw)))
+	if !decoded.Truncated {
+		t.Error("truncated attendu")
+	}
+}
+
+func TestLimitSearchOutputReencodesWithoutCutting(t *testing.T) {
+	// Sortie indentée au-delà du budget mais contenu sous le budget : rien
+	// n'est coupé, le LLM ne doit pas lire "truncated".
+	sections := make([]any, 0, 30)
+	for i := range 30 {
+		sections = append(sections, map[string]any{"id": fmt.Sprintf("s%d", i), "content": strings.Repeat("a", 1000)})
+	}
+	raw, err := json.MarshalIndent(map[string]any{"results": []any{
+		map[string]any{"source": "file:///cctp.txt", "sections": sections},
+	}}, "", strings.Repeat(" ", 200))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) <= maxSearchChars {
+		t.Fatalf("jeu de test trop petit: %d caractères", len(raw))
+	}
+
+	decoded := decodeLimited(t, limitSearchOutput(string(raw)))
+	if decoded.Truncated {
+		t.Error("truncated alors que rien n'a été coupé")
+	}
+	if n := len(decoded.Results[0].Sections); n != 30 {
+		t.Errorf("%d section(s) gardée(s), attendu 30", n)
+	}
+}
+
+type limitedOutput struct {
+	Truncated bool `json:"truncated"`
+	Results   []struct {
+		Source   string `json:"source"`
+		Sections []struct {
+			Content string `json:"content"`
+		} `json:"sections"`
+	} `json:"results"`
+}
+
+// decodeLimited vérifie qu'une sortie bornée tient dans maxSearchChars et
+// reste du JSON valide.
+func decodeLimited(t *testing.T, got string) limitedOutput {
+	t.Helper()
+	if n := len([]rune(got)); n > maxSearchChars {
+		t.Fatalf("sortie trop longue: %d caractères", n)
+	}
+	var decoded limitedOutput
+	if err := json.Unmarshal([]byte(got), &decoded); err != nil {
+		t.Fatalf("la sortie bornée doit rester du JSON valide: %v", err)
+	}
+	return decoded
 }
 
 func TestListDocuments(t *testing.T) {

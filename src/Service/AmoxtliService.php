@@ -45,6 +45,10 @@ class AmoxtliService
 
     private const DOC_LIST_PAGE_SIZE = 200;
 
+    /** Pièces de chaque marché, et workspaces amoxtli, sous le projet. */
+    private const MARKETS_DIR = 'uploads/boamp';
+    private const WORKSPACES_DIR = 'uploads/amoxtli';
+
     /** Délai d'amoxtli sync par fichier (son défaut) : la synchro entière est bornée par leur somme. */
     private const SYNC_FILE_TIMEOUT = 300;
 
@@ -99,7 +103,10 @@ class AmoxtliService
             else:
                 import openpyxl
                 # Sans data_only, openpyxl rend le texte des formules (=D5*E5) au lieu de leur résultat.
-                for sheet in openpyxl.load_workbook(path, data_only=True).worksheets:
+                # read_only lit les lignes au fil de l'eau : dix fois moins de mémoire.
+                for sheet in openpyxl.load_workbook(path, data_only=True, read_only=True).worksheets:
+                    # En read_only, openpyxl s'arrête à la plage déclarée par le fichier, parfois fausse.
+                    sheet.reset_dimensions()
                     yield sheet.title, sheet.values
 
         def text(v):
@@ -144,22 +151,34 @@ class AmoxtliService
 
     public function getWorkspacePath(string $id): string
     {
-        return $this->projectDir.'/uploads/amoxtli/'.$this->checkMarketId($id);
+        return $this->projectDir.'/'.self::WORKSPACES_DIR.'/'.$this->checkMarketId($id);
     }
 
     public function getMarketPath(string $id): string
     {
-        return $this->projectDir.'/uploads/boamp/'.$this->checkMarketId($id);
+        return $this->projectDir.'/'.self::MARKETS_DIR.'/'.$this->checkMarketId($id);
+    }
+
+    /**
+     * Marchés qui ont des pièces ou un workspace : l'index d'un marché dont
+     * le dossier de pièces a disparu est à vider.
+     *
+     * @return list<string>
+     */
+    public function listMarketIds(): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('basename', array_merge(
+            glob($this->projectDir.'/'.self::MARKETS_DIR.'/*', GLOB_ONLYDIR) ?: [],
+            glob($this->projectDir.'/'.self::WORKSPACES_DIR.'/*', GLOB_ONLYDIR) ?: [],
+        )), 'ctype_digit')));
+        sort($ids, SORT_NATURAL);
+
+        return $ids;
     }
 
     public function getBinaryPath(): string
     {
         return $this->binaryPath;
-    }
-
-    public function getProjectDir(): string
-    {
-        return $this->projectDir;
     }
 
     /**
@@ -763,11 +782,15 @@ class AmoxtliService
         // fichier ; un délai dépassé ou une erreur d'embeddings ne dit rien de la pièce.
         $rejected = preg_match('/^exit status (\d+)$/', $error, $match) && $this->rejectsFile((int) $match[1]);
 
+        $file = $report['sources'][$entry] ?? $entry;
         $report['failed'][] = [
-            'file' => $report['sources'][$entry] ?? $entry,
+            'file' => $file,
             'reason' => sprintf('illisible par amoxtli (%s)', $error),
         ] + ($rejected ? [] : ['retry' => true]);
         unset($report['sources'][$entry]);
+        // Pas indexée : le rapport ne la compte pas aussi comme convertie ou copiée.
+        $report['converted'] = array_values(array_diff($report['converted'], [$file]));
+        $report['copied'] = array_values(array_diff($report['copied'], [$file]));
 
         return $present;
     }

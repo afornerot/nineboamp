@@ -58,17 +58,7 @@ class AmoxtliReindexCommand extends Command
             return Command::FAILURE;
         }
 
-        // Les marchés qui ont des pièces ou un workspace : l'index d'un marché
-        // dont le dossier de pièces a disparu est supprimé.
-        $marketIds = [(string) $marketId];
-        if ($all) {
-            $uploads = $this->amoxtliService->getProjectDir().'/uploads';
-            $marketIds = array_values(array_unique(array_filter(array_map('basename', array_merge(
-                glob($uploads.'/boamp/*', GLOB_ONLYDIR) ?: [],
-                glob($uploads.'/amoxtli/*', GLOB_ONLYDIR) ?: [],
-            )), 'ctype_digit')));
-            sort($marketIds, SORT_NATURAL);
-        }
+        $marketIds = $all ? $this->amoxtliService->listMarketIds() : [(string) $marketId];
 
         $failed = 0;
         foreach ($marketIds as $id) {

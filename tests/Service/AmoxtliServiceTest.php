@@ -217,19 +217,35 @@ class AmoxtliServiceTest extends TestCase
 
     public function testUnchangedFailedPieceIsNotRetried(): void
     {
-        file_put_contents($this->marketPath.'/casse.docx', 'pas un zip');
+        file_put_contents($this->marketPath.'/vide.csv', str_repeat(' ', 10));
+        $mtime = (int) filemtime($this->marketPath.'/vide.csv');
         $first = $this->index();
-        $this->assertSame(['casse.docx'], $first['copied']);
+        $this->assertSame([['file' => 'vide.csv', 'reason' => 'aucun texte extrait']], $first['failed']);
+
+        // Même taille et même date : la pièce passe pour inchangée, et n'est pas retentée.
+        file_put_contents($this->marketPath.'/vide.csv', 'lisiblecsv');
+        touch($this->marketPath.'/vide.csv', $mtime);
+        $this->assertSame($first['failed'], $this->index()['failed']);
+
+        // La réindexation la retente.
+        $report = $this->index(true);
+        $this->assertSame(['vide.csv'], $report['converted']);
+        $this->assertSame([], $report['failed']);
+    }
+
+    public function testPieceRejectedByAmoxtliIsOnlyReportedAsFailed(): void
+    {
+        file_put_contents($this->marketPath.'/casse.docx', 'pas un zip');
 
         $report = $this->index();
 
-        // Ni recopiée, ni laissée dans le corpus où amoxtli la retenterait.
         $this->assertSame([], $report['copied']);
+        $this->assertCount(1, $report['failed']);
+        $this->assertStringStartsWith('illisible par amoxtli (exit status', $report['failed'][0]['reason']);
+        // Refusée par le convertisseur d'amoxtli : pas retentée tant qu'elle ne change pas.
+        $this->assertArrayNotHasKey('retry', $report['failed'][0]);
+        // Ni laissée dans le corpus où amoxtli la retenterait.
         $this->assertFileDoesNotExist($this->corpusPath.'/casse.docx');
-        $this->assertSame($first['failed'], $report['failed']);
-
-        // La réindexation retente la pièce.
-        $this->assertSame(['casse.docx'], $this->index(true)['copied']);
     }
 
     public function testUnreadableSpreadsheetIsNotRetried(): void
@@ -349,6 +365,19 @@ class AmoxtliServiceTest extends TestCase
 
         $this->assertSame(['CCAP.pdf'], $report['converted']);
         $this->assertSame(['CCAP.pdf.txt'], $this->search('reconstruiteclause'));
+    }
+
+    public function testMarketIdsComeFromPiecesAndWorkspaces(): void
+    {
+        $fs = new Filesystem();
+        $fs->mkdir([
+            $this->projectDir.'/uploads/boamp/12',
+            $this->projectDir.'/uploads/boamp/avatar',
+            $this->projectDir.'/uploads/amoxtli/3',
+            $this->projectDir.'/uploads/amoxtli/12',
+        ]);
+
+        $this->assertSame(['1', '3', '12'], $this->service->listMarketIds());
     }
 
     public function testFindLegacyTxt(): void

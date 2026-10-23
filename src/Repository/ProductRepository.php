@@ -5,6 +5,7 @@ namespace App\Repository;
 use App\Entity\Product;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
+use SortDirection;
 
 class ProductRepository extends ServiceEntityRepository
 {
@@ -21,7 +22,7 @@ class ProductRepository extends ServiceEntityRepository
         return $this->createQueryBuilder('p')
             ->where('p.name LIKE :q')
             ->setParameter('q', '%' . $query . '%')
-            ->orderBy('p.name', 'ASC')
+            ->orderBy('p.name', SortDirection::Ascending)
             ->setMaxResults(10)
             ->getQuery()
             ->getResult();

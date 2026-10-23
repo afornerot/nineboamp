@@ -5,6 +5,7 @@ namespace App\Repository;
 use App\Entity\MarketChatMessage;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
+use SortDirection;
 
 class MarketChatMessageRepository extends ServiceEntityRepository
 {
@@ -21,7 +22,7 @@ class MarketChatMessageRepository extends ServiceEntityRepository
         $qb = $this->createQueryBuilder('m')
             ->andWhere('m.market = :marketId')
             ->setParameter('marketId', $marketId)
-            ->orderBy('m.createdAt', 'ASC');
+            ->orderBy('m.createdAt', SortDirection::Ascending);
 
         if ($limit > 0) {
             $qb->setMaxResults($limit);
@@ -40,7 +41,7 @@ class MarketChatMessageRepository extends ServiceEntityRepository
             ->andWhere('m.important = :important')
             ->setParameter('marketId', $marketId)
             ->setParameter('important', true)
-            ->orderBy('m.createdAt', 'ASC');
+            ->orderBy('m.createdAt', SortDirection::Ascending);
 
         if ($limit > 0) {
             $qb->setMaxResults($limit);

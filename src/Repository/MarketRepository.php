@@ -5,6 +5,7 @@ namespace App\Repository;
 use App\Entity\Market;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
+use SortDirection;
 
 class MarketRepository extends ServiceEntityRepository
 {
@@ -21,7 +22,7 @@ class MarketRepository extends ServiceEntityRepository
         return $this->createQueryBuilder('m')
             ->andWhere('m.status = :status')
             ->setParameter('status', $status)
-            ->orderBy('m.updatedAt', 'DESC')
+            ->orderBy('m.updatedAt', SortDirection::Descending)
             ->getQuery()
             ->getResult();
     }
@@ -34,7 +35,7 @@ class MarketRepository extends ServiceEntityRepository
         return $this->createQueryBuilder('m')
             ->andWhere('m.priority = :priority')
             ->setParameter('priority', $priority)
-            ->orderBy('m.score', 'DESC')
+            ->orderBy('m.score', SortDirection::Descending)
             ->getQuery()
             ->getResult();
     }

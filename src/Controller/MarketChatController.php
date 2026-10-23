@@ -19,6 +19,7 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Process\Exception\ProcessFailedException;
 use Symfony\Component\Process\Process;
 use Symfony\Component\Routing\Attribute\Route;
+use SortDirection;
 
 class MarketChatController extends AbstractController
 {
@@ -603,13 +604,13 @@ class MarketChatController extends AbstractController
 
         $lastAssistantMessage = $this->chatRepo->findOneBy(
             ['market' => $market, 'role' => 'assistant'],
-            ['createdAt' => 'DESC']
+            ['createdAt' => SortDirection::Descending]
         );
 
         $debugData = $lastAssistantMessage?->getDebugData();
         $lastUserMessage = $this->chatRepo->findOneBy(
             ['market' => $market, 'role' => 'user'],
-            ['createdAt' => 'DESC']
+            ['createdAt' => SortDirection::Descending]
         );
 
         return $this->render('admin/chat_debug.html.twig', [

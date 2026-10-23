@@ -5,6 +5,7 @@ namespace App\Repository;
 use App\Entity\BoampReport;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
+use SortDirection;
 
 class BoampReportRepository extends ServiceEntityRepository
 {
@@ -19,7 +20,7 @@ class BoampReportRepository extends ServiceEntityRepository
     public function findRecent(int $limit = 30): array
     {
         return $this->createQueryBuilder('br')
-            ->orderBy('br.executedAt', 'DESC')
+            ->orderBy('br.executedAt', SortDirection::Descending)
             ->setMaxResults($limit)
             ->getQuery()
             ->getResult();

@@ -5,6 +5,7 @@ namespace App\Repository;
 use App\Entity\MarketProduct;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
+use SortDirection;
 
 class MarketProductRepository extends ServiceEntityRepository
 {
@@ -22,7 +23,7 @@ class MarketProductRepository extends ServiceEntityRepository
             ->join('mp.product', 'p')
             ->andWhere('mp.market = :marketId')
             ->setParameter('marketId', $marketId)
-            ->orderBy('mp.score', 'DESC')
+            ->orderBy('mp.score', SortDirection::Descending)
             ->getQuery()
             ->getResult();
     }

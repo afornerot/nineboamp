@@ -19,6 +19,7 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
+use SortDirection;
 
 class MarketController extends AbstractController
 {
@@ -33,7 +34,7 @@ class MarketController extends AbstractController
     #[Route('/user/market', name: 'app_market_list')]
     public function list(MarketRepository $repository): Response
     {
-        $markets = $repository->findBy([], ['score' => 'DESC', 'updatedAt' => 'DESC']);
+        $markets = $repository->findBy([], ['score' => SortDirection::Descending, 'updatedAt' => SortDirection::Descending]);
 
         return $this->render('market/list.html.twig', [
             'usemenu' => true,

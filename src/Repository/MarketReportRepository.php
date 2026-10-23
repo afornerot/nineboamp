@@ -5,6 +5,7 @@ namespace App\Repository;
 use App\Entity\MarketReport;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
+use SortDirection;
 
 /**
  * @extends ServiceEntityRepository<MarketReport>
@@ -24,7 +25,7 @@ class MarketReportRepository extends ServiceEntityRepository
         return $this->createQueryBuilder('r')
             ->andWhere('r.market = :marketId')
             ->setParameter('marketId', $marketId)
-            ->orderBy('r.createdAt', 'DESC')
+            ->orderBy('r.createdAt', SortDirection::Descending)
             ->getQuery()
             ->getResult();
     }
@@ -34,7 +35,7 @@ class MarketReportRepository extends ServiceEntityRepository
         return $this->createQueryBuilder('r')
             ->andWhere('r.market = :marketId')
             ->setParameter('marketId', $marketId)
-            ->orderBy('r.createdAt', 'DESC')
+            ->orderBy('r.createdAt', SortDirection::Descending)
             ->setMaxResults(1)
             ->getQuery()
             ->getOneOrNullResult();

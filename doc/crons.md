@@ -57,6 +57,8 @@ consommés par deux workers lancés en parallèle des crons :
 - `messenger:consume amoxtli` traite les `IndexMarketMessage` déclenchés par
   les uploads / suppressions de fichiers ([doc/amoxtli.md](amoxtli.md)) : une
   indexation peut durer plusieurs minutes, elle a son propre worker.
-- Démarrage dans `misc/script/reconfigure.sh` (via `supervisord` ou
-  `nohup` selon le contexte Docker).
+- Démarrage dans `misc/script/reconfigure.sh`, chacun dans une boucle : un
+  worker qui s'arrête, même en erreur, est relancé après 5 s, et une sortie
+  en erreur est notée dans `var/log/startup.log`. Le script est copié dans
+  l'image : le modifier demande de la reconstruire.
 - Vérifier l'état via `php bin/console messenger:stats`.

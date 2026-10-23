@@ -15,7 +15,7 @@
                          copies et conversions texte             │
                                   │                              ▼
                                   ▼                     [MarketChatController]
-                       amoxtli sync corpus/  ──>  uploads/amoxtli/{id}/.amoxtli/
+                  amoxtli add (par lots), sync  ──>  uploads/amoxtli/{id}/.amoxtli/
 ```
 
 ## Pipeline d'indexation
@@ -85,7 +85,8 @@ Déclenchée :
    chat et les outils de l'agent Go l'utilisent pour donner le nom d'origine
    des pièces (`CCTP.pdf`, pas `CCTP.pdf.txt`) ; l'onglet y prend aussi la
    liste des pièces non indexées avec leur raison. `list_documents` ne donne
-   au LLM que ces noms, au plus 500.
+   au LLM que ces noms, au plus 500. Si `amoxtli doc list` échoue, l'onglet
+   et `app:amoxtli:reindex` affichent l'erreur au lieu d'un index vide.
 
 Un passage sans changement prend environ 1 s.
 
@@ -137,7 +138,7 @@ docker compose exec nineboamp bin/console app:amoxtli:reindex --all --purge-lega
 
 ## Chat IA
 
-L'agent (Go, port 8000 — voir [IA / LLM](ai.md)) écoute sur `localhost:8000` et utilise le mechanism de **function calling** pour accéder aux documents indexés via amoxtli.
+L'agent (Go, port 8000 — voir [IA / LLM](ai.md)) écoute sur `localhost:8000` et utilise le mécanisme de **function calling** pour accéder aux documents indexés via amoxtli.
 
 Endpoint : `POST /user/market/{id}/chat` (`app_market_chat`).
 
@@ -150,6 +151,12 @@ Workflow (`MarketChatController::chat()`) :
    - Peut utiliser les outils `amoxtli_search` et `list_documents` pour rechercher dans les documents
    - Répond via l'API LLM avec function calling
 4. **Sauvegarde** réponse → `MarketChatMessage`.
+
+Sans agent (indisponible, ou job refusé), le contrôleur répond lui-même
+(`chatWithAiService()`) : le LLM planifie des requêtes, chacune est cherchée
+dans amoxtli (3 résultats), puis `AiService` répond à partir des extraits.
+Les pièces citées (nom d'origine) sont enregistrées comme sources du message,
+et les trois phases sont visibles sur `/admin/market/{id}/chat/debug`.
 
 ## Liens connexes
 

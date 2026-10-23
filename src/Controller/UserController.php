@@ -79,13 +79,13 @@ class UserController extends AbstractController
         }
         $hashedPassword = $user->getPassword();
 
-        $fileService->init('avatar', '0');
+        $fileService->init('avatar', (string) $user->getId());
 
         $form = $this->createForm(UserType::class, $user, ['mode' => 'update', 'modeAuth' => $this->getParameter('modeAuth')]);
         $form->handleRequest($request);
         if ($form->isSubmitted() && $form->isValid()) {
             $user = $form->getData();
-            if ($user->getPassword()) {
+            if ($form->has('password') && $user->getPassword()) {
                 $hashedPassword = $passwordHasher->hashPassword(
                     $user,
                     $user->getPassword()
@@ -129,13 +129,13 @@ class UserController extends AbstractController
         }
         $hashedPassword = $user->getPassword();
 
-        $fileService->init('avatar', '0');
+        $fileService->init('avatar', (string) $user->getId());
 
         $form = $this->createForm(UserType::class, $user, ['mode' => 'profil', 'modeAuth' => $this->getParameter('modeAuth')]);
         $form->handleRequest($request);
         if ($form->isSubmitted() && $form->isValid()) {
             $user = $form->getData();
-            if ($user->getPassword()) {
+            if ($form->has('password') && $user->getPassword()) {
                 $hashedPassword = $passwordHasher->hashPassword(
                     $user,
                     $user->getPassword()

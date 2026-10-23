@@ -18,6 +18,7 @@ use Symfony\Component\Validator\Constraints as Assert;
 #[UniqueEntity(fields: ['username'], message: 'Ce nom d’utilisateur est déjà pris.')]
 class User implements UserInterface, PasswordAuthenticatedUserInterface
 {
+    private const DEFAULT_AVATAR = '**public**/medias/avatar/noavatar.png';
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column]
@@ -39,7 +40,7 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     private ?string $password = null;
 
     #[ORM\Column(length: 255, nullable: true)]
-    private ?string $avatar = null;
+    private ?string $avatar = self::DEFAULT_AVATAR;
 
     #[ORM\Column(length: 255, unique: true)]
     #[Assert\Email(message: 'Veuillez entrer un email valide.')]
@@ -141,7 +142,15 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
 
     public function getAvatar(): ?string
     {
-        return $this->avatar ? $this->avatar : 'medias/avatar/noavatar.png';
+        if (!$this->avatar) {
+            return self::DEFAULT_AVATAR;
+        }
+
+        if (str_starts_with($this->avatar, 'medias/')) {
+            return '**public**/'.$this->avatar;
+        }
+
+        return $this->avatar;
     }
 
     public function setAvatar(?string $avatar): static

@@ -4,11 +4,11 @@ namespace App\Form;
 
 use App\Entity\Groupe;
 use App\Entity\User;
+use Bnine\FilesBundle\Form\Type\IconUploadType;
 use Symfony\Bridge\Doctrine\Form\Type\EntityType;
 use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
 use Symfony\Component\Form\Extension\Core\Type\EmailType;
-use Symfony\Component\Form\Extension\Core\Type\HiddenType;
 use Symfony\Component\Form\Extension\Core\Type\PasswordType;
 use Symfony\Component\Form\Extension\Core\Type\RepeatedType;
 use Symfony\Component\Form\Extension\Core\Type\SubmitType;
@@ -24,6 +24,8 @@ class UserType extends AbstractType
 {
     public function buildForm(FormBuilderInterface $builder, array $options): void
     {
+        $user = $builder->getData();
+
         $builder
         ->add('submit', SubmitType::class, [
             'label' => 'Valider',
@@ -50,7 +52,18 @@ class UserType extends AbstractType
             'attr' => 'SQL' !== $options['modeAuth'] ? ['style' => 'background: #e9ecef;'] : [],
         ])
 
-        ->add('avatar', HiddenType::class)
+        ->add('avatar', IconUploadType::class, [
+            'label' => 'Avatar',
+            'icon_label' => 'Modifier',
+            'icon_empty_preview' => 'medias/avatar/noavatar.png',
+            'icon_domain' => 'avatar',
+            'icon_entity_id' => $user instanceof User ? ($user->getId() ?? 0) : 0,
+            'crop' => true,
+            'crop_min_size' => 150,
+            'crop_ratio' => '1/1',
+            'preview_max_height' => 100,
+            'img_class' => 'bigavatar',
+        ])
 
         ->add('email', EmailType::class, [
             'label' => 'Email',

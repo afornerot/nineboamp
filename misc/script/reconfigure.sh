@@ -13,6 +13,8 @@ bin/console cache:clear
 bin/console d:s:u --force
 bin/console app:init
 
+bin/console assets:install public
+
 supercronic -quiet -no-reap /crontab &
 SUPERCRONIC_PID=$!
 

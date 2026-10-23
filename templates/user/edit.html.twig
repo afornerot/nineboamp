@@ -16,9 +16,7 @@
         {% include('include/error.html.twig') %}
 
         <div class="text-center d-flex flex-column align-items-center">
-            <img id="user_avatar_img" src="{{asset(form.vars.value.avatar)}}" class="bigavatar mb-2">
             {{ form_row(form.avatar) }}
-            <a class="btn btn-info" style="max-width:100%; margin-bottom:15px;" onclick="BnineModalOpen({id:'bnine-modal-avatar',title:'Avatar',url:'{{ path('bninefiles_files_uploadmodal',{domain:'avatar',id:0}) }}?crop',currentInput:'user_avatar'})" title='Ajouter un avatar'>Modifier</a>
         </div>
 
         <div class="row">
@@ -59,13 +57,6 @@
     <script>
         $(document).ready(function() {
             $("#user_username").focus();
-        });
-
-        document.addEventListener('bnine-modal-closed', function() {
-            var val = $('#user_avatar').val();
-            if (val) {
-                $('#user_avatar_img').attr('src', val).show();
-            }
         });
     </script>
 {% endblock %}

@@ -29,6 +29,15 @@ security:
       custom_authenticators:
         - App\Security\McpAuthenticator
 
+    bninefiles:
+      # Routes publiques du bundle bnine-files (image, thumbnail) pour les
+      # domaines publics (avatars, logos, icones). Les routes protegees du
+      # bundle (uploadmodal, uploadfile, delete, mkdir, crop) restent sous le
+      # firewall main et gardent leur controle d'acces (FileVoter).
+      pattern: ^/bninefiles/(image|thumbnail)/(avatar|logo|icon)/
+      security: false
+      stateless: true
+
     main:
       pattern: ^/
       provider: sql_provider

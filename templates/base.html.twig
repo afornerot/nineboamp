@@ -13,7 +13,6 @@
         <link rel="stylesheet" href="{{ asset('lib/select2/select2-bootstrap-5-theme.min.css') }}">
         <link rel="stylesheet" href="{{ asset('lib/dropzone/dropzone.min.css') }}">
         <link rel="stylesheet" href="{{ asset('lib/dropzone/dropzone-bootstrap.css') }}">
-        <link rel="stylesheet" href="{{ asset('lib/imgareaselect/css/imgareaselect-default.css') }}">
 
         <link rel="stylesheet" href="{{ asset('lib/app/app.css') }}">
         <link rel="stylesheet" href="{{ asset('lib/app/selbg.css') }}">
@@ -26,12 +25,12 @@
         <script src="{{ asset('lib/select2/select2.min.js') }}"></script>
         <script src="{{ asset('lib/select2/select2.init.js') }}"></script>
         <script src="{{ asset('lib/dropzone/dropzone.min.js') }}"></script>
-        <script src="{{ asset('lib/imgareaselect/js/jquery.imgareaselect.dev.js') }}"></script>
         <script src="{{ asset('lib/jqueryui/jquery-ui.min.js') }}"></script>
         <script src="{{ asset('lib/chart/chart.js') }}"></script>
         <script src="{{ asset('lib/marked/marked.min.js') }}"></script>
 
         <script src="{{ asset('bundles/bninemdeditor/bninemdeditor.js') }}"></script>
+        <script src="{{ asset('bundles/bninefiles/js/bninefiles-constants.js') }}"></script>
         <script src="{{ asset('bundles/bninefiles/js/bninefiles.js') }}"></script>
         <script src="{{ asset('lib/app/app.js') }}"></script>
 
@@ -64,7 +63,7 @@
                             {% if is_granted('ROLE_ADMIN') %}
                                 <a class="nav-link px-2" href="{{path('app_admin')}}" aria-label="Administration"><i class="fa-solid fa-cog fa-2x"></i></a>
                             {% endif %}
-                            <a class="nav-link px-2" href="{{path('app_user_profil')}}" aria-label="Profil"><img src="{{asset(app.user.avatar ?? 'medias/avatar/noavatar.png')}}" class="avatar" alt="Avatar"></a>
+                            <a class="nav-link px-2" href="{{path('app_user_profil')}}" aria-label="Profil"><img src="{{ bninefile(app.user.avatar) }}" class="avatar" alt="Avatar"></a>
                             <a class="nav-link px-2" href="{{path('app_logout')}}" aria-label="Déconnexion"><i class="fa-solid fa-right-from-bracket fa-2x"></i></a>
                         {% else %}
                             <a class="nav-link px-2" href="{{path('app_login')}}" aria-label="Connexion"><i class="fa-solid fa-right-to-bracket fa-2x"></i></a>
@@ -116,20 +115,6 @@
                         Une erreur est survenue.
                     </div>
                     <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Fermer"></button>
-                </div>
-            </div>
-        </div>
-
-        <div id="mymodal" class="modal" tabindex="-1">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h4 class="modal-title">INFORMATION</h4>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <iframe id="framemodal" frameborder=0 width="100%" height="600px"></iframe>
-                    </div>
                 </div>
             </div>
         </div>

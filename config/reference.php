@@ -680,10 +680,10 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         message_bus?: scalar|Param|null, // The message bus to use. // Default: "messenger.default_bus"
  *         routing?: array<string, array{ // Default: []
  *             service?: scalar|Param|null,
- *             secret?: scalar|Param|null, // Default: ""
+ *             secret?: scalar|Param|null, // The secret used to verify incoming request signatures. It must be set in production: with an empty value, depending on the parser, requests from any sender are accepted or every request is rejected. // Default: ""
  *         }>,
  *     },
- *     remote-event?: bool|array{ // RemoteEvent configuration
+ *     remote_event?: bool|array{ // RemoteEvent configuration
  *         enabled?: bool|Param, // Default: false
  *     },
  *     json_streamer?: bool|array{ // JSON streamer configuration
@@ -1280,7 +1280,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *             token_handler?: Param|string|array{
  *                 id?: scalar|Param|null,
  *                 oidc_user_info?: Param|string|array{
- *                     base_uri?: scalar|Param|null, // Base URI of the userinfo endpoint on the OIDC server, or the OIDC server URI to use the discovery (require "discovery" to be configured).
+ *                     base_uri?: scalar|Param|null, // Base URI of the userinfo endpoint on the OIDC server, or the OIDC server URI to use the discovery (require "discovery" to be configured). The latter must end with a slash when it has a path, as the discovery path is resolved against it as a relative URL.
  *                     discovery?: array{ // Enable the OIDC discovery.
  *                         cache?: array{
  *                             id?: scalar|Param|null, // Cache service id to use to cache the OIDC discovery configuration.
@@ -1349,9 +1349,9 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *             lifetime?: int|Param, // Default: 31536000
  *             path?: scalar|Param|null, // Default: "/"
  *             domain?: scalar|Param|null, // Default: null
- *             secure?: true|false|"auto"|Param, // Default: "auto"
+ *             secure?: true|false|"auto"|Param, // Defaults to the value of "framework.session.cookie_secure", or to "auto".
  *             httponly?: bool|Param, // Default: true
- *             samesite?: null|"lax"|"strict"|"none"|Param, // Default: "lax"
+ *             samesite?: null|"lax"|"strict"|"none"|Param, // Defaults to the value of "framework.session.cookie_samesite", or to "lax".
  *             always_remember_me?: bool|Param, // Default: false
  *             remember_me_parameter?: scalar|Param|null, // Default: "_remember_me"
  *         },
@@ -1546,55 +1546,6 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *     root_namespace?: scalar|Param|null, // Default: "App"
  *     generate_final_classes?: bool|Param, // Default: true
  *     generate_final_entities?: bool|Param, // Default: false
- * }
- * @psalm-type OneupUploaderConfig = array{
- *     chunks?: array{
- *         maxage?: scalar|Param|null, // Default: 604800
- *         storage?: array{
- *             type?: "filesystem"|"gaufrette"|"flysystem"|Param, // Default: "filesystem"
- *             filesystem?: scalar|Param|null, // Default: null
- *             directory?: scalar|Param|null, // Default: null
- *             stream_wrapper?: scalar|Param|null, // Default: null
- *             sync_buffer_size?: scalar|Param|null, // Default: "100K"
- *             prefix?: scalar|Param|null, // Default: "chunks"
- *         },
- *         load_distribution?: bool|Param, // Default: true
- *     },
- *     orphanage?: array{
- *         maxage?: scalar|Param|null, // Default: 604800
- *         directory?: scalar|Param|null, // Default: null
- *     },
- *     twig?: scalar|Param|null, // Default: true
- *     mappings?: array<string, array{ // Default: []
- *         frontend?: "fineuploader"|"blueimp"|"uploadify"|"yui3"|"fancyupload"|"mooupload"|"plupload"|"dropzone"|"custom"|Param,
- *         custom_frontend?: array{
- *             name?: scalar|Param|null, // Default: null
- *             class?: scalar|Param|null, // Default: null
- *         },
- *         storage?: array{
- *             service?: scalar|Param|null, // Default: null
- *             type?: "filesystem"|"gaufrette"|"flysystem"|Param, // Default: "filesystem"
- *             filesystem?: scalar|Param|null, // Default: null
- *             directory?: scalar|Param|null, // Default: null
- *             stream_wrapper?: scalar|Param|null, // Default: null
- *             sync_buffer_size?: scalar|Param|null, // Default: "100K"
- *         },
- *         route_prefix?: scalar|Param|null, // Default: ""
- *         endpoints?: Param|string|array{
- *             upload?: scalar|Param|null, // Default: null
- *             progress?: scalar|Param|null, // Default: null
- *             cancel?: scalar|Param|null, // Default: null
- *         },
- *         allowed_mimetypes?: array<string, list<scalar|Param|null>>,
- *         disallowed_mimetypes?: list<scalar|Param|null>,
- *         error_handler?: scalar|Param|null, // Default: null
- *         max_size?: scalar|Param|null, // Set max_size to -1 for gracefully downgrade this number to the systems max upload size. // Default: 9223372036854775807
- *         use_orphanage?: bool|Param, // Default: false
- *         enable_progress?: bool|Param, // Default: false
- *         enable_cancelation?: bool|Param, // Default: false
- *         namer?: scalar|Param|null, // Default: "oneup_uploader.namer.uniqid"
- *         root_folder?: bool|Param, // Default: false
- *     }>,
  * }
  * @psalm-type FosRestConfig = array{
  *     disable_csrf_role?: scalar|Param|null, // Default: null
@@ -1992,7 +1943,6 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *     twig_extra?: TwigExtraConfig,
  *     security?: SecurityConfig,
  *     monolog?: MonologConfig,
- *     oneup_uploader?: OneupUploaderConfig,
  *     fos_rest?: FosRestConfig,
  *     nelmio_api_doc?: NelmioApiDocConfig,
  *     flysystem?: FlysystemConfig,
@@ -2013,7 +1963,6 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         security?: SecurityConfig,
  *         monolog?: MonologConfig,
  *         maker?: MakerConfig,
- *         oneup_uploader?: OneupUploaderConfig,
  *         fos_rest?: FosRestConfig,
  *         nelmio_api_doc?: NelmioApiDocConfig,
  *         flysystem?: FlysystemConfig,
@@ -2032,7 +1981,6 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         twig_extra?: TwigExtraConfig,
  *         security?: SecurityConfig,
  *         monolog?: MonologConfig,
- *         oneup_uploader?: OneupUploaderConfig,
  *         fos_rest?: FosRestConfig,
  *         nelmio_api_doc?: NelmioApiDocConfig,
  *         flysystem?: FlysystemConfig,
@@ -2052,7 +2000,6 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         twig_extra?: TwigExtraConfig,
  *         security?: SecurityConfig,
  *         monolog?: MonologConfig,
- *         oneup_uploader?: OneupUploaderConfig,
  *         fos_rest?: FosRestConfig,
  *         nelmio_api_doc?: NelmioApiDocConfig,
  *         flysystem?: FlysystemConfig,

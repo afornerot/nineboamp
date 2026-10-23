@@ -1,8 +1,3 @@
-function ModalLoad(idmodal, title, path) {
-	$("#" + idmodal + " .modal-header h4").text(title);
-	$("#" + idmodal + " #framemodal").attr("src", path);
-}
-
 $(document).ready(function () {
 	$(document).on('select2:open', () => {
 		setTimeout(() => {

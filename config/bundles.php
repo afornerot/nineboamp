@@ -13,7 +13,6 @@ return [
     Symfony\Bundle\SecurityBundle\SecurityBundle::class => ['all' => true],
     Symfony\Bundle\MonologBundle\MonologBundle::class => ['all' => true],
     Symfony\Bundle\MakerBundle\MakerBundle::class => ['dev' => true],
-    Oneup\UploaderBundle\OneupUploaderBundle::class => ['all' => true],
     FOS\RestBundle\FOSRestBundle::class => ['all' => true],
     Bnine\FilesBundle\BnineFilesBundle::class => ['all' => true],
     Bnine\MdEditorBundle\BnineMdEditorBundle::class => ['all' => true],

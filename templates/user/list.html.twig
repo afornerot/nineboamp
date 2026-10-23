@@ -23,7 +23,7 @@
                         {% for user in users %}
                             <tr>
                                 <td><a href="{{ path(routeupdate,{id:user.id}) }}"><i class="fas fa-file fa-2x"></i></a></td>
-                                <td><img class="avatar" src="{{ asset(user.avatar)}}"></td>
+                                <td><img class="avatar" src="{{ bninefile(user.avatar) }}"></td>
                                 <td>{{user.username}}</td>
                                 <td>{{user.lastname}}</td>
                                 <td>{{user.firstname}}</td>

@@ -44,5 +44,7 @@ services:
             $storage: '@app_storage'
             $s3: '%env(bool:STORAGE_S3)%'
 
+    Bnine\FilesBundle\Cache\CachePolicyInterface: '@App\Cache\FileCachePolicy'
+
     App\Security\Voter\FileVoter:
         tags: [security.voter]

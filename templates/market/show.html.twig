@@ -733,6 +733,15 @@
             return d.innerHTML;
         }
 
+        function renderUnindexed(unindexed) {
+            if (!unindexed || unindexed.length === 0) return '';
+            var html = '<div class="alert alert-warning mt-3 mb-0"><i class="fas fa-exclamation-triangle me-2"></i>' + unindexed.length + ' pièce(s) non indexée(s), absente(s) des réponses du chat :<ul class="mb-0 mt-2">';
+            unindexed.forEach(function(item) {
+                html += '<li>' + escapeHtml(item.file) + ' <span class="text-muted">(' + escapeHtml(item.reason) + ')</span></li>';
+            });
+            return html + '</ul></div>';
+        }
+
         function renderIndexedDocs(data) {
             if (!indexedDocsBody) return;
             if (!data.available) {
@@ -743,8 +752,9 @@
                 indexedDocsBody.innerHTML = '<div class="alert alert-info mb-0"><i class="fas fa-info-circle me-2"></i>Workspace amoxtli pas encore initialisé.</div>';
                 return;
             }
+            var unindexedHtml = renderUnindexed(data.unindexed);
             if (!data.documents || data.documents.length === 0) {
-                indexedDocsBody.innerHTML = '<div class="alert alert-info mb-0"><i class="fas fa-info-circle me-2"></i>Aucun fichier indexé.</div>';
+                indexedDocsBody.innerHTML = '<div class="alert alert-info mb-0"><i class="fas fa-info-circle me-2"></i>Aucun fichier indexé.</div>' + unindexedHtml;
                 return;
             }
             var html = '<table class="table table-sm mb-0"><thead><tr><th>Fichier</th><th>Type</th><th>Taille</th><th>Indexé le</th></tr></thead><tbody>';
@@ -752,9 +762,10 @@
                 var icon = '<i class="fas fa-file-alt me-2"></i>';
                 if (doc.extension === 'pdf') icon = '<i class="fas fa-file-pdf me-2 text-danger"></i>';
                 else if (doc.extension === 'docx' || doc.extension === 'doc') icon = '<i class="fas fa-file-word me-2 text-primary"></i>';
-                html += '<tr><td>' + icon + escapeHtml(doc.filename || 'N/A') + '</td><td><span class="badge bg-secondary">' + ((doc.extension || '?').toUpperCase()) + '</span></td><td>' + formatBytes(doc.size) + '</td><td><small>' + formatDate(doc.indexed_at) + '</small></td></tr>';
+                else if (doc.extension === 'xlsx' || doc.extension === 'xls' || doc.extension === 'csv') icon = '<i class="fas fa-file-excel me-2 text-success"></i>';
+                html +='<tr><td>' + icon + escapeHtml(doc.filename || 'N/A') + '</td><td><span class="badge bg-secondary">' + ((doc.extension || '?').toUpperCase()) + '</span></td><td>' + formatBytes(doc.size) + '</td><td><small>' + formatDate(doc.indexed_at) + '</small></td></tr>';
             });
-            html += '</tbody></table><div class="text-muted small mt-2">' + data.documents.length + ' document(s) indexé(s)</div>';
+            html += '</tbody></table><div class="text-muted small mt-2">' + data.documents.length + ' document(s) indexé(s)</div>' + unindexedHtml;
             indexedDocsBody.innerHTML = html;
         }
 

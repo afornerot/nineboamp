@@ -20,7 +20,10 @@ SUPERCRONIC_PID=$!
 
 start_messenger() {
     while true; do
-        bin/console messenger:consume "$1" --memory-limit=256M
+        # Sans "||", set -e arrêterait la boucle au premier worker sorti en
+        # erreur, et la surveillance plus bas redémarrerait tout le conteneur.
+        bin/console messenger:consume "$1" --memory-limit=256M \
+            || echo "$(date '+%F %T') messenger:consume $1 sorti en erreur ($?), relancé" >> var/log/startup.log
         sleep 5
     done
 }

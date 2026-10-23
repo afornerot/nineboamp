@@ -232,7 +232,7 @@ class AmoxtliService
                 }
             } while ($removed);
 
-            // Un nom de pièce qui n'est pas en UTF-8 ne doit pas empêcher d'écrire le rapport.
+            // Le message d'erreur d'un convertisseur peut ne pas être en UTF-8 : il ne doit pas empêcher d'écrire le rapport.
             $json = json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR);
             // dumpFile() écrit puis renomme : la page du marché ne lit jamais un rapport à moitié écrit.
             $fs->dumpFile($this->getReportPath($id), $json);
@@ -297,7 +297,11 @@ class AmoxtliService
         $report = ['converted' => [], 'copied' => [], 'removed' => [], 'unsupported' => [], 'failed' => [], 'sources' => [], 'fingerprints' => []];
         $converters = $this->converters();
 
-        foreach (is_dir($marketPath) ? $this->listFiles($marketPath) : [] as $file) {
+        foreach (is_dir($marketPath) ? $this->listFiles($marketPath) : [] as $path) {
+            // Le rapport est en JSON : un nom qui n'est pas en UTF-8 (archive
+            // extraite sous Windows…) y serait altéré, et ne correspondrait
+            // plus au passage suivant. Comme les CSV, il est lu en Windows-1252.
+            $file = mb_check_encoding($path, 'UTF-8') ? $path : mb_convert_encoding($path, 'UTF-8', 'Windows-1252');
             $extension = strtolower(pathinfo($file, PATHINFO_EXTENSION));
             $converter = $converters[$extension] ?? null;
 
@@ -316,14 +320,22 @@ class AmoxtliService
                 continue;
             }
 
-            $report['sources'][$entry] = $file;
-            $source = $marketPath.'/'.$file;
+            $source = $marketPath.'/'.$path;
             $target = $corpusPath.'/'.$entry;
 
             // Date et taille, lues avant la conversion : une pièce encore en
             // cours d'écriture, ou remplacée dans la même seconde, change de
             // taille et sera refaite au passage suivant.
-            $fingerprint = filemtime($source).':'.filesize($source);
+            $mtime = @filemtime($source);
+            $size = @filesize($source);
+            if (false === $mtime || false === $size) {
+                // Supprimée depuis le début du passage : son entrée part avec
+                // les orphelins, et la suppression a relancé une indexation.
+                continue;
+            }
+
+            $report['sources'][$entry] = $file;
+            $fingerprint = $mtime.':'.$size;
             $report['fingerprints'][$file] = $fingerprint;
             $unchanged = ($fingerprints[$file] ?? null) === $fingerprint;
 
@@ -373,7 +385,7 @@ class AmoxtliService
     }
 
     /**
-     * @return array{available: bool, initialized: bool, documents: array<int, array{filename: ?string, extension: ?string, size: ?int, indexed_at: ?string, source: ?string, etag: ?string}>, unindexed: list<array{file: string, reason: string}>}
+     * @return array{available: bool, initialized: bool, documents: array<int, array{filename: ?string, extension: ?string, size: ?int, indexed_at: ?string, source: ?string, etag: ?string}>, unindexed: list<array{file: string, reason: string}>, error: ?string}
      */
     public function listIndexedDocuments(string $marketId): array
     {
@@ -382,6 +394,8 @@ class AmoxtliService
             'initialized' => false,
             'documents' => [],
             'unindexed' => [],
+            // Si la liste n'a pas pu être lue : documents vide ne dit alors rien de l'index.
+            'error' => null,
         ];
 
         if (!$result['available']) {
@@ -403,38 +417,13 @@ class AmoxtliService
             $result['unindexed'][] = ['file' => $failure['file'], 'reason' => $failure['reason']];
         }
 
-        // amoxtli pagine la liste (50 documents par défaut).
-        $documents = [];
-        for ($page = 1;; ++$page) {
-            $process = new Process([
-                $this->binaryPath,
-                '--json',
-                '-C', $workspacePath,
-                'doc', 'list',
-                '--limit', (string) self::DOC_LIST_PAGE_SIZE,
-                '--page', (string) $page,
-            ]);
-            $process->setTimeout(30);
+        try {
+            $documents = $this->fetchDocuments($workspacePath);
+        } catch (\RuntimeException $e) {
+            // Une liste vide ou partielle passerait pour l'index du marché.
+            $result['error'] = $e->getMessage();
 
-            try {
-                $this->runAmoxtli($process);
-            } catch (\Throwable) {
-                return $result;
-            }
-
-            if (!$process->isSuccessful()) {
-                return $result;
-            }
-
-            $data = json_decode($process->getOutput(), true);
-            if (!is_array($data) || !isset($data['documents']) || !is_array($data['documents'])) {
-                return $result;
-            }
-
-            array_push($documents, ...$data['documents']);
-            if (count($data['documents']) < self::DOC_LIST_PAGE_SIZE || count($documents) >= (int) ($data['total'] ?? 0)) {
-                break;
-            }
+            return $result;
         }
 
         $sources = $report['sources'] ?? [];
@@ -469,6 +458,51 @@ class AmoxtliService
         }, $documents);
 
         return $result;
+    }
+
+    /**
+     * Tous les documents de l'index, page par page (amoxtli en donne 50 par
+     * défaut).
+     *
+     * @throws \RuntimeException si une page n'a pas pu être lue
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function fetchDocuments(string $workspacePath): array
+    {
+        $documents = [];
+        for ($page = 1;; ++$page) {
+            $process = new Process([
+                $this->binaryPath,
+                '--json',
+                '-C', $workspacePath,
+                'doc', 'list',
+                '--limit', (string) self::DOC_LIST_PAGE_SIZE,
+                '--page', (string) $page,
+            ]);
+            $process->setTimeout(30);
+
+            try {
+                $this->runAmoxtli($process);
+            } catch (ProcessTimedOutException) {
+                throw new \RuntimeException(sprintf('amoxtli doc list : délai de %d s dépassé', $process->getTimeout()));
+            }
+
+            if (!$process->isSuccessful()) {
+                $error = $this->lastErrorLine($process);
+                throw new \RuntimeException(sprintf('amoxtli doc list : %s', '' !== $error ? $error : 'code '.$process->getExitCode()));
+            }
+
+            $data = json_decode($process->getOutput(), true);
+            if (!is_array($data) || !isset($data['documents']) || !is_array($data['documents'])) {
+                throw new \RuntimeException('amoxtli doc list : réponse illisible');
+            }
+
+            array_push($documents, ...$data['documents']);
+            if (count($data['documents']) < self::DOC_LIST_PAGE_SIZE || count($documents) >= (int) ($data['total'] ?? 0)) {
+                return $documents;
+            }
+        }
     }
 
     /**
@@ -816,14 +850,24 @@ class AmoxtliService
         }
 
         if (!$process->isSuccessful()) {
-            $lines = preg_split('/\R/', trim($process->getErrorOutput())) ?: [];
-            $error = trim((string) end($lines));
-            $message = sprintf('échec de %s (%s)', $command[0], '' !== $error ? mb_substr($error, 0, 200) : 'code '.$process->getExitCode());
+            $error = $this->lastErrorLine($process);
+            $message = sprintf('échec de %s (%s)', $command[0], '' !== $error ? $error : 'code '.$process->getExitCode());
 
             throw $this->rejectsFile($process->getExitCode()) ? new \UnexpectedValueException($message) : new \RuntimeException($message);
         }
 
         return $process->getOutput();
+    }
+
+    /**
+     * Dernière ligne de la sortie d'erreur, qui dit la cause après les
+     * éventuels journaux.
+     */
+    private function lastErrorLine(Process $process): string
+    {
+        $lines = preg_split('/\R/', trim($process->getErrorOutput())) ?: [];
+
+        return mb_substr(trim((string) end($lines)), 0, 200);
     }
 
     /**

@@ -47,6 +47,10 @@ Déclenchée :
      L'extension d'origine reste dans le nom : `devis.pdf` et `devis.xlsx` ne
      se marchent pas dessus.
 
+   Un nom de fichier qui n'est pas en UTF-8 (archive extraite sous Windows…)
+   est lu en Windows-1252, comme le contenu des CSV : le rapport, en JSON,
+   l'altérerait sinon, et la pièce serait refaite à chaque passage.
+
    Le rapport garde la date et la taille de chaque pièce : une entrée n'est
    refaite que si sa pièce a changé (remplacement sous le même nom compris,
    ou pièce indexée pendant que l'upload l'écrivait encore). Une pièce refusée

@@ -392,7 +392,31 @@ class AmoxtliServiceTest extends TestCase
 
         $this->index();
 
-        $this->assertSame(["\u{FFFD}t\u{FFFD}.zip"], array_column($this->service->listIndexedDocuments('1')['unindexed'], 'file'));
+        $this->assertSame(['été.zip'], array_column($this->service->listIndexedDocuments('1')['unindexed'], 'file'));
+    }
+
+    public function testPieceNamedInLatin1IsConvertedOnce(): void
+    {
+        file_put_contents($this->marketPath."/\xE9t\xE9.csv", "Lot;Prix\nlatinpiece;12\n");
+
+        $this->assertSame(['été.csv'], $this->index()['converted']);
+        $this->assertSame([], $this->index()['converted']);
+
+        $this->assertSame(['été.csv.txt'], $this->search('latinpiece'));
+        $this->assertSame(['été.csv'], $this->indexedFiles());
+    }
+
+    public function testUnreadableListingIsNotAnEmptyIndex(): void
+    {
+        file_put_contents($this->marketPath.'/notes.txt', 'Notes.');
+        $this->index();
+
+        file_put_contents($this->projectDir.'/uploads/amoxtli/1/.amoxtli/config.yaml', 'version: [');
+        $result = $this->service->listIndexedDocuments('1');
+
+        $this->assertTrue($result['initialized']);
+        $this->assertSame([], $result['documents']);
+        $this->assertStringStartsWith('amoxtli doc list : error: could not load', (string) $result['error']);
     }
 
     public function testEveryDocumentIsListed(): void

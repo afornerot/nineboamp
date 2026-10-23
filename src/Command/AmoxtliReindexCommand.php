@@ -114,6 +114,10 @@ class AmoxtliReindexCommand extends Command
         }
 
         $result = $this->amoxtliService->listIndexedDocuments($marketId);
+        if (null !== $result['error']) {
+            $io->warning(sprintf('Index reconstruit, mais sa liste est illisible : %s', $result['error']));
+            return;
+        }
         $io->success(sprintf('%d document(s) indexé(s).', count($result['documents'])));
     }
 

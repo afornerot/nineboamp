@@ -753,6 +753,10 @@
                 return;
             }
             var unindexedHtml = renderUnindexed(data.unindexed);
+            if (data.error) {
+                indexedDocsBody.innerHTML = '<div class="alert alert-danger mb-0"><i class="fas fa-exclamation-circle me-2"></i>Liste des documents indexés indisponible <span class="text-muted">(' + escapeHtml(data.error) + ')</span>.</div>' + unindexedHtml;
+                return;
+            }
             if (!data.documents || data.documents.length === 0) {
                 indexedDocsBody.innerHTML = '<div class="alert alert-info mb-0"><i class="fas fa-info-circle me-2"></i>Aucun fichier indexé.</div>' + unindexedHtml;
                 return;

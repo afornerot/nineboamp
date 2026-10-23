@@ -5,53 +5,100 @@
 ## Vue d'ensemble
 
 ```
-[upload PDF/DOCX/TXT]                              [requête chat]
+[upload / suppression]                             [requête chat]
         │                                                  │
         ▼                                                  ▼
-[boamp/{id}/ files] ──> AmoxtliService::indexMarket() ──> Amoxtli workspace
-        │                                                       │
-        ▼                                                       ▼
-[pdftotext -layout]                                       ┌────────────┐
-        │                                                  │  amoxtli   │
-        ▼                                                  │  search    │
-[uploads/amoxtli/{id}/] ←──────────────  amoxtli sync     └─────┬──────┘
-                                                                   │
-                                                                   ▼
-                                                        [Agent Go :8000]
-                                                                   │
-                                                                   ├── amoxtli_search (tool)
-                                                                   ├── list_documents (tool)
-                                                                   │
-                                                                   ▼
-                                                       [MarketChatController]
-                                                                   │
-                                                                   ▼
-                                                     [MarketChatMessage (BDD)]
+[uploads/boamp/{id}/]  ──>  AmoxtliService::indexMarket()     [Agent Go :8000]
+  pièces déposées,                │                              │
+  jamais modifiées                ▼                              ├── amoxtli_search (tool)
+                       [uploads/amoxtli/{id}/corpus/]            ├── list_documents (tool)
+                         copies et conversions texte             │
+                                  │                              ▼
+                                  ▼                     [MarketChatController]
+                       amoxtli sync corpus/  ──>  uploads/amoxtli/{id}/.amoxtli/
 ```
 
 ## Pipeline d'indexation
 
 Déclenchée :
 
-- Automatiquement à chaque upload / suppression de fichier sur le marché
-  (listener `AmoxtliIndexListener` → dispatch `IndexMarketMessage` sur le bus
-  asynchrone).
-- Manuellement via `php bin/console messenger:consume async` (worker).
+- automatiquement à chaque upload ou suppression d'une pièce d'un marché
+  (listener `AmoxtliIndexListener`, domaine `boamp` uniquement → dispatch
+  `IndexMarketMessage` sur le bus asynchrone, traité par le worker
+  `messenger:consume async`) ;
+- manuellement par `app:amoxtli:reindex` (voir plus bas).
 
-Étapes dans `AmoxtliService::indexMarket()` :
+Étapes de `AmoxtliService::indexMarket()`, sous un verrou
+`amoxtli-market-{id}` (le worker et la commande peuvent viser le même marché) :
 
-1. **Vérification** : existence du répertoire `uploads/boamp/{id}/`. Sinon,
-   no-op.
-2. **Initialisation workspace** : `amoxtli init` dans `uploads/amoxtli/{id}/`
-   (un sous-répertoire par marché). Skip si déjà initialisé.
-3. **Conversion PDF** : pour chaque `.pdf` non encore converti, `pdftotext
-   -layout` produit un `.txt` à côté (l'indexeur texte ignore les PDFs natifs).
-4. **Sync** : `amoxtli sync uploads/boamp/{id}/ --base-dir uploads/boamp/{id}/
-   --no-wait` (le `--no-wait` évite de bloquer les uploads).
+1. **Vérification** : sans dossier `uploads/boamp/{id}/`, rien à faire.
+2. **Workspace** : `amoxtli init` dans `uploads/amoxtli/{id}/` s'il n'existe
+   pas encore.
+3. **Corpus** (`buildCorpus()`) : parcours récursif des pièces, en ignorant les
+   fichiers cachés et les dossiers préfixés `_` (`_thumbs`), comme la liste des
+   fichiers du marché. Chaque pièce donne une entrée dans
+   `uploads/amoxtli/{id}/corpus/`, au même chemin relatif :
+   - format lu par amoxtli → copie (extension mise en minuscules : amoxtli
+     refuse `.TXT`, `.DOCX`…) ;
+   - format à convertir → `<nom complet>.txt`, par exemple `CCTP.pdf.txt`.
+     L'extension d'origine reste dans le nom : `devis.pdf` et `devis.xlsx` ne
+     se marchent pas dessus.
 
-Les fichiers Excel (`.xlsx`) ne sont **pas** indexés par Amoxtli (format non
-supporté en v0.17). Seuls `.txt`, `.md`, `.docx`, `.pdf` (via `.txt`)
-remontent dans la recherche.
+   Une entrée porte la date de modification de sa pièce : elle n'est refaite
+   que si la pièce a changé (remplacement sous le même nom compris). Les
+   entrées dont la pièce a disparu sont supprimées.
+4. **Sync** : `amoxtli sync corpus/ --base-dir corpus/`, sans `--no-wait` pour
+   récupérer le résultat de chaque fichier. Un fichier qu'amoxtli ne sait pas
+   lire (ex. `.docx` corrompu) est signalé sans faire échouer le marché.
+5. **Rapport** : `uploads/amoxtli/{id}/corpus-report.json` (pièces converties,
+   copiées, supprimées, non prises en charge, en échec). L'onglet « Documents
+   indexés » de la page marché l'utilise pour afficher le nom d'origine des
+   pièces et la liste des pièces non indexées avec leur raison.
+
+Un passage sans changement prend environ 1 s.
+
+## Formats pris en charge
+
+| Format | Traitement |
+|--------|------------|
+| `.txt`, `.md`, `.docx`, `.odt`, `.rtf`, `.html`, `.rst`, `.epub`, `.tex` | lus par amoxtli (pandoc), copiés tels quels |
+| `.pdf` | `pdftotext -layout`. Un PDF sans texte (ou de plus de 50 Ko avec moins de 100 caractères) est signalé « PDF image, OCR requis » |
+| `.doc` | `catdoc`, ou `antiword` pour les `.doc` que catdoc refuse (ceux écrits par LibreOffice) |
+| `.xlsx`, `.xls` | toutes les feuilles en CSV, chacune précédée de `## Feuille : <nom>` (openpyxl, xlrd) |
+| `.csv` | copié en `.csv.txt` (converti en UTF-8 s'il est en Windows-1252) |
+| autres (`.pptx`, `.ods`, `.zip`, images…) | non indexés, signalés « format non pris en charge » |
+
+Pour ajouter un format : une entrée dans `AmoxtliService::converters()`
+(extension → fonction qui renvoie le texte), et l'outil dans
+`misc/docker/Dockerfile`.
+
+## Réindexation
+
+```bash
+docker compose exec nineboamp bin/console app:amoxtli:reindex <id>
+docker compose exec nineboamp bin/console app:amoxtli:reindex --all
+```
+
+Supprime l'index et le corpus du marché, les reconstruit et affiche le rapport.
+`--all` parcourt `uploads/boamp/*` : les marchés qui ont des pièces sans
+workspace sont inclus.
+
+### Migration depuis l'ancienne indexation
+
+L'ancienne version écrivait les conversions (`X.txt` pour `X.pdf` ou
+`X.xlsx`) dans le dossier des pièces. Ces fichiers apparaissent dans la liste
+des fichiers du marché et seraient indexés comme des pièces déposées :
+
+```bash
+# 1. Relire la liste : un .txt déposé volontairement avec le même nom de base serait supprimé aussi
+docker compose exec nineboamp bin/console app:amoxtli:reindex --all --purge-legacy-txt --dry-run
+# 2. Supprimer ces .txt et réindexer
+docker compose exec nineboamp bin/console app:amoxtli:reindex --all --purge-legacy-txt
+```
+
+Le worker Messenger doit tourner avec le nouveau code : après un déploiement
+sans redémarrage du conteneur, `bin/console messenger:stop-workers` (la boucle
+de `misc/script/reconfigure.sh` le relance).
 
 ## Chat IA
 

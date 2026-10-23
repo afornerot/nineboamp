@@ -130,7 +130,7 @@ docker compose exec nineboamp grep AiService var/log/dev.log | tail
 | Log : `quota` / HTTP 429 | Quota du fournisseur épuisé (ex. Gemini gratuit : 20 requêtes/jour/modèle) | Changer de modèle ou de fournisseur. L'app réessaie 3 fois puis abandonne |
 | Log : `réponse IA vide ou inattendue` avec `reasoning_content` | Modèle « à raisonnement » à court de tokens | Augmenter `max_tokens` dans l'en-tête du prompt concerné (`src/DataFixtures/data/scoring/*.md`) |
 | `Deadlock` / `SAVEPOINT does not exist` sur `app:init` | Lancé pendant l'init du démarrage | Attendre « START HTTPD » et relancer |
-| Chat ou rapport IA d'un marché avec pièces `.xlsx` qui renvoie des sections tronquées ou une erreur de contexte | Tableur converti avant la correction de la conversion xlsx (des Mo de cellules vides) : le `.txt` existant est réutilisé tel quel | `docker compose exec nineboamp bin/console app:amoxtli:reindex --all` (ou `app:amoxtli:reindex <id>` pour un seul marché) |
+| Pièce absente des réponses du chat | Format non pris en charge, PDF scanné ou fichier illisible : l'onglet « Documents indexés » du marché liste les pièces non indexées et la raison | Formats pris en charge : [doc/amoxtli.md](doc/amoxtli.md#formats-pris-en-charge). Après une mise à jour depuis l'ancienne indexation : `app:amoxtli:reindex --all --purge-legacy-txt --dry-run`, puis sans `--dry-run` ([migration](doc/amoxtli.md#migration-depuis-lancienne-indexation)) |
 
 ## Fonctionnalités principales
 
@@ -140,7 +140,7 @@ docker compose exec nineboamp grep AiService var/log/dev.log | tail
 | **Scoring IA** | Évaluation automatique 0-100 + priorité A/B/C pour chaque marché, exécutée par un LLM | [doc/ai.md](doc/ai.md) |
 | **Prompts en fichiers .md** | Prompts LLM stockés dans `src/DataFixtures/data/scoring/*.md` (éditables sans redéploiement) | [doc/ai.md](doc/ai.md) |
 | **Requalification manuelle** | Bouton "Requalifier" sur la page marché pour re-scoring individuel sans recrawler | [doc/boamp.md](doc/boamp.md#requalification-individuelle) |
-| **Indexation Amoxtli** | PDF/DOCX/TXT des pièces jointes indexés via Amoxtli pour RAG | [doc/amoxtli.md](doc/amoxtli.md) |
+| **Indexation Amoxtli** | Pièces jointes (PDF, DOC/DOCX, XLS/XLSX, CSV, ODT, TXT…) indexées via Amoxtli pour RAG ; pièces non indexées signalées sur le marché | [doc/amoxtli.md](doc/amoxtli.md) |
 | **Chat IA agenté** | Assistant conversationnel utilisant un agent LLM avec function calling (accès aux documents + base de données) | [doc/ai.md](doc/ai.md) |
 | **Export PDF** | Génération PDF propre du dossier marché (informations + produits + chat) | — |
 | **Filtres cumulés** | Filtres priorité + statut sur la liste, sauvegardés en localStorage | — |

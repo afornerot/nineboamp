@@ -12,6 +12,15 @@ framework:
                 retry_strategy:
                     max_retries: 3
                     multiplier: 2
+            # Indexation amoxtli, consommée par son propre worker : une longue
+            # indexation, ou l'attente du verrou d'un marché, ne retarde pas les emails.
+            amoxtli:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                options:
+                    queue_name: amoxtli
+                retry_strategy:
+                    max_retries: 3
+                    multiplier: 2
             failed: 'doctrine://default?queue_name=failed'
             # sync: 'sync://'
 
@@ -26,4 +35,4 @@ framework:
             Symfony\Component\Notifier\Message\SmsMessage: async
 
             # Route your messages to the transports
-            'App\Message\IndexMarketMessage': async
+            'App\Message\IndexMarketMessage': amoxtli

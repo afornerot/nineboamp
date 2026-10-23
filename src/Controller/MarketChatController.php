@@ -78,7 +78,7 @@ class MarketChatController extends AbstractController
         }
 
         if (null === $jobId) {
-            $reply = $this->chatWithAiService($market, $userMessage, $debugData);
+            ['reply' => $reply, 'sources' => $allSources] = $this->chatWithAiService($market, $userMessage, $debugData);
             if ('' === $reply) {
                 $reply = "Désolé, je n'ai pas pu traiter votre question. Veuillez réessayer.";
             }
@@ -175,9 +175,12 @@ class MarketChatController extends AbstractController
     }
 
     /**
-     * Chat using the traditional AiService (fallback).
+     * Chat using the traditional AiService (fallback). $debugData reçoit les
+     * phases affichées par la page de debug du chat.
+     *
+     * @return array{reply: string, sources: array<int, string>}
      */
-    private function chatWithAiService(Market $market, string $userMessage, array $debugData): string
+    private function chatWithAiService(Market $market, string $userMessage, array &$debugData): array
     {
         $plannedResult = $this->planQueries($userMessage);
         $plannedQueries = $plannedResult['queries'];
@@ -191,6 +194,7 @@ class MarketChatController extends AbstractController
         }
 
         $context = [];
+        $allSources = [];
         if (!empty($plannedQueries)) {
             $ragResults = $this->searchWithQueries($market->getId(), $plannedQueries);
             $context = $ragResults['sections'];
@@ -215,7 +219,7 @@ class MarketChatController extends AbstractController
 
         $reply = $this->aiService->askMessages($messages, 0.3, 2048);
 
-        return $reply;
+        return ['reply' => $reply, 'sources' => $allSources];
     }
 
     /**
@@ -351,7 +355,7 @@ class MarketChatController extends AbstractController
         $process->setTimeout(30);
 
         try {
-            $process->run();
+            $this->amoxtliService->runAmoxtli($process);
         } catch (ProcessFailedException) {
             return ['sections' => [], 'sources' => []];
         }
@@ -369,11 +373,8 @@ class MarketChatController extends AbstractController
         $sections = [];
         $sources = [];
         foreach ($data['results'] as $result) {
-            if (preg_match('/file:\/\/\/([^\s\n]+)/', $result['source'] ?? '', $m)) {
-                $source = basename($m[1]);
-                if (!in_array($source, $sources, true)) {
-                    $sources[] = $source;
-                }
+            if (is_string($result['source'] ?? null)) {
+                $sources[] = $result['source'];
             }
             foreach ($result['sections'] ?? [] as $section) {
                 $sections[] = $section['content'] ?? '';
@@ -536,14 +537,11 @@ class MarketChatController extends AbstractController
                     $allSections[] = $section;
                 }
             }
-            foreach ($result['sources'] as $source) {
-                if (!in_array($source, $allSources, true)) {
-                    $allSources[] = $source;
-                }
-            }
+            array_push($allSources, ...$result['sources']);
         }
 
-        return ['sections' => $allSections, 'sources' => $allSources];
+        // La source d'un résultat est l'entrée du corpus (CCTP.pdf.txt), pas la pièce déposée.
+        return ['sections' => $allSections, 'sources' => $this->amoxtliService->getPieceNames((string) $marketId, $allSources)];
     }
 
     /**

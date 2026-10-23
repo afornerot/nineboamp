@@ -56,6 +56,46 @@ func TestAmoxtliSearch(t *testing.T) {
 	}
 }
 
+// writeReport écrit le rapport du corpus d'un workspace, comme l'indexation PHP.
+func writeReport(t *testing.T, workspace string, sources map[string]string) {
+	t.Helper()
+	data, err := json.Marshal(map[string]any{"sources": sources})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "corpus-report.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAmoxtliSearchGivesPieceNames(t *testing.T) {
+	dir := t.TempDir()
+	bin := writeScript(t, dir, `#!/bin/sh
+cat <<'JSON'
+{
+  "results": [
+    {"source": "file:///Cahier%20des%20charges.pdf.txt", "score": 0.5, "sections": [{"id": "s1", "content": "R&D <b>"}]},
+    {"source": "file:///annexes/notes.txt", "score": 0.25}
+  ],
+  "next_cursor": ""
+}
+JSON
+`)
+
+	workspace := filepath.Join(dir, "ws", "1")
+	if err := os.MkdirAll(filepath.Join(workspace, ".amoxtli"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeReport(t, workspace, map[string]string{"Cahier des charges.pdf.txt": "Cahier des charges.pdf", "annexes/notes.txt": "annexes/NOTES.TXT"})
+	tl := New(Config{AmoxtliBin: bin, AmoxtliDir: filepath.Join(dir, "ws")})
+
+	got := execute(t, tl, "amoxtli_search", map[string]any{"query": "x", "market_id": float64(1)})
+	want := `{"next_cursor":"","results":[{"score":0.5,"sections":[{"id":"s1","content":"R&D <b>"}],"source":"Cahier des charges.pdf"},{"score":0.25,"source":"annexes/NOTES.TXT"}]}`
+	if got != want {
+		t.Errorf("amoxtli_search = %s\nattendu       %s", got, want)
+	}
+}
+
 func TestAmoxtliSearchMissingWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	tl := New(Config{AmoxtliBin: "/bin/false", AmoxtliDir: dir})
@@ -215,7 +255,7 @@ func decodeLimited(t *testing.T, got string) limitedOutput {
 
 func TestListDocuments(t *testing.T) {
 	dir := t.TempDir()
-	bin := writeScript(t, dir, "#!/bin/sh\nprintf '%s' '[\"cctp.pdf\"]'\n")
+	bin := writeScript(t, dir, "#!/bin/sh\nprintf '%s' '{\"documents\": [{\"source\": \"file:///CCTP.pdf.txt\"}], \"total\": 1}'\n")
 
 	workspaceRoot := filepath.Join(dir, "ws")
 	if err := os.MkdirAll(filepath.Join(workspaceRoot, "3", ".amoxtli"), 0o755); err != nil {
@@ -224,8 +264,60 @@ func TestListDocuments(t *testing.T) {
 	tl := New(Config{AmoxtliBin: bin, AmoxtliDir: workspaceRoot})
 
 	got := execute(t, tl, "list_documents", map[string]any{"market_id": float64(3)})
-	if got != `["cctp.pdf"]` {
+	if got != `{"documents":["CCTP.pdf.txt"],"total":1}` {
+		t.Errorf("list_documents sans rapport du corpus = %q", got)
+	}
+
+	writeReport(t, filepath.Join(workspaceRoot, "3"), map[string]string{"CCTP.pdf.txt": "CCTP.pdf"})
+	got = execute(t, tl, "list_documents", map[string]any{"market_id": float64(3)})
+	if got != `{"documents":["CCTP.pdf"],"total":1}` {
 		t.Errorf("list_documents = %q", got)
+	}
+}
+
+func TestListDocumentsReadsEveryPage(t *testing.T) {
+	pageSize := docListPageSize
+	docListPageSize = 2
+	t.Cleanup(func() { docListPageSize = pageSize })
+
+	// 5 documents, servis par pages de --limit.
+	dir := t.TempDir()
+	bin := writeScript(t, dir, `#!/bin/sh
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --limit) limit=$2 ;;
+    --page) page=$2 ;;
+  esac
+  shift
+done
+docs=""
+i=$(( (page - 1) * limit + 1 ))
+last=$(( page * limit ))
+while [ $i -le $last ] && [ $i -le 5 ]; do
+  docs="$docs${docs:+,}{\"source\": \"file:///piece-$i.txt\"}"
+  i=$(( i + 1 ))
+done
+printf '{"documents": [%s], "total": 5}' "$docs"
+`)
+
+	workspaceRoot := filepath.Join(dir, "ws")
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, "3", ".amoxtli"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tl := New(Config{AmoxtliBin: bin, AmoxtliDir: workspaceRoot})
+
+	got := execute(t, tl, "list_documents", map[string]any{"market_id": float64(3)})
+	if got != `{"documents":["piece-1.txt","piece-2.txt","piece-3.txt","piece-4.txt","piece-5.txt"],"total":5}` {
+		t.Errorf("list_documents = %q", got)
+	}
+
+	listed := maxListedDocuments
+	maxListedDocuments = 3
+	t.Cleanup(func() { maxListedDocuments = listed })
+
+	got = execute(t, tl, "list_documents", map[string]any{"market_id": float64(3)})
+	if got != `{"documents":["piece-1.txt","piece-2.txt","piece-3.txt"],"total":5,"truncated":true}` {
+		t.Errorf("list_documents bornée = %q", got)
 	}
 }
 
@@ -339,5 +431,61 @@ func TestExecTimeout(t *testing.T) {
 	got := execute(t, tl, "list_documents", map[string]any{"market_id": float64(1)})
 	if !strings.Contains(got, "error") {
 		t.Errorf("timeout attendu comme erreur JSON: %q", got)
+	}
+}
+
+// busyScript simule un workspace tenu par une indexation : amoxtli refuse
+// les refusals premiers appels, puis répond.
+func busyScript(t *testing.T, dir string, refusals int) string {
+	t.Helper()
+	counter := filepath.Join(dir, "calls")
+	return writeScript(t, dir, fmt.Sprintf(`#!/bin/sh
+n=$(cat %[1]q 2>/dev/null || echo 0)
+echo $((n + 1)) > %[1]q
+if [ "$n" -lt %[2]d ]; then
+	echo 'error: workspace is already in use by another amoxtli process (sync, pid 1); only one process can use it at a time' >&2
+	exit 1
+fi
+printf '%%s' '{"hits": 1}'
+`, counter, refusals))
+}
+
+func TestAmoxtliSearchWaitsForTheWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	bin := busyScript(t, dir, 2)
+
+	workspaceRoot := filepath.Join(dir, "ws")
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, "1", ".amoxtli"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tl := New(Config{AmoxtliBin: bin, AmoxtliDir: workspaceRoot})
+
+	got := execute(t, tl, "amoxtli_search", map[string]any{"query": "x", "market_id": float64(1)})
+	if got != `{"hits": 1}` {
+		t.Errorf("amoxtli_search = %q", got)
+	}
+}
+
+func TestAmoxtliBusyWaitIsBounded(t *testing.T) {
+	wait, retry := amoxtliBusyWait, amoxtliBusyRetry
+	amoxtliBusyWait, amoxtliBusyRetry = 300*time.Millisecond, 10*time.Millisecond
+	defer func() { amoxtliBusyWait, amoxtliBusyRetry = wait, retry }()
+
+	dir := t.TempDir()
+	bin := busyScript(t, dir, 1_000_000)
+
+	workspaceRoot := filepath.Join(dir, "ws")
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, "1", ".amoxtli"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tl := New(Config{AmoxtliBin: bin, AmoxtliDir: workspaceRoot})
+
+	start := time.Now()
+	got := execute(t, tl, "list_documents", map[string]any{"market_id": float64(1)})
+	if !strings.Contains(got, "workspace is already in use") {
+		t.Errorf("l'erreur d'amoxtli doit remonter: %q", got)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("attente de %s, bornée à %s attendue", elapsed, amoxtliBusyWait)
 	}
 }

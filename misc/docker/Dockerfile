@@ -25,9 +25,10 @@ COPY --from=agentbuild --chown=root:root /out/nineagent /usr/local/bin/nineagent
 WORKDIR /app
 COPY --chown=apache:apache . .
 
-# Outils du pipeline amoxtli (pdftotext, pandoc, xlsx → csv via openpyxl)
+# Outils du pipeline amoxtli (pdftotext, pandoc, .doc → texte via catdoc ou
+# antiword, xlsx/xls → csv via openpyxl/xlrd)
 USER root
-RUN apk add --no-cache poppler-utils pandoc python3 py3-pip build-base && pip3 install --no-cache-dir --break-system-packages openpyxl
+RUN apk add --no-cache poppler-utils pandoc catdoc antiword python3 py3-pip build-base && pip3 install --no-cache-dir --break-system-packages openpyxl xlrd
 USER apache
 
 RUN composer install --no-interaction --no-scripts

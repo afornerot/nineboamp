@@ -102,14 +102,81 @@ func (t *Tools) amoxtliSearch(ctx context.Context, params map[string]any) (llm.T
 		return errorResult(err.Error()), nil
 	}
 
-	stdout, stderr, err := t.run(ctx, t.cfg.AmoxtliBin, "-C", workspace, "search", query, "--json", "-n", strconv.Itoa(limit))
+	stdout, stderr, err := t.runAmoxtli(ctx, "-C", workspace, "search", query, "--json", "-n", strconv.Itoa(limit))
 	if err != nil {
 		if stderr != "" {
 			return errorResult(stderr), nil
 		}
 		return errorResult(err.Error()), nil
 	}
-	return llm.NewToolResult(limitSearchOutput(stdout)), nil
+	return llm.NewToolResult(limitSearchOutput(nameSearchSources(stdout, readPieces(workspace)))), nil
+}
+
+// readPieces lit, dans le rapport écrit par l'indexation (PHP), la pièce
+// déposée d'où vient chaque entrée du corpus indexé (CCTP.pdf.txt → CCTP.pdf).
+func readPieces(workspace string) map[string]string {
+	data, err := os.ReadFile(filepath.Join(workspace, "corpus-report.json"))
+	if err != nil {
+		return nil
+	}
+	var report struct {
+		Sources map[string]string `json:"sources"`
+	}
+	if err := json.Unmarshal(data, &report); err != nil {
+		return nil
+	}
+	return report.Sources
+}
+
+// pieceName donne la pièce déposée d'une source amoxtli
+// (file:///Cahier%20des%20charges.pdf.txt → Cahier des charges.pdf), ou à
+// défaut le chemin de son entrée dans le corpus.
+func pieceName(source string, pieces map[string]string) string {
+	u, err := url.Parse(source)
+	if err != nil {
+		return source
+	}
+	entry := strings.TrimPrefix(u.Path, "/")
+	if name, ok := pieces[entry]; ok {
+		return name
+	}
+	return entry
+}
+
+// nameSearchSources remplace la source de chaque résultat par le nom de sa
+// pièce : le LLM cite CCTP.pdf, pas file:///CCTP.pdf.txt.
+func nameSearchSources(out string, pieces map[string]string) string {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		return out
+	}
+	var results []map[string]json.RawMessage
+	if err := json.Unmarshal(payload["results"], &results); err != nil {
+		return out
+	}
+
+	for _, result := range results {
+		var source string
+		if err := json.Unmarshal(result["source"], &source); err != nil {
+			continue
+		}
+		name, err := encodeJSON(pieceName(source, pieces))
+		if err != nil {
+			return out
+		}
+		result["source"] = json.RawMessage(name)
+	}
+
+	encodedResults, err := encodeJSON(results)
+	if err != nil {
+		return out
+	}
+	payload["results"] = json.RawMessage(encodedResults)
+	encoded, err := encodeJSON(payload)
+	if err != nil {
+		return out
+	}
+	return encoded
 }
 
 // Bornes de la sortie d'amoxtli_search transmise au LLM : une recherche
@@ -247,6 +314,17 @@ func truncateRunes(s string, n int) string {
 	return string(runes[:max(n-markerLen, 0)]) + truncatedMarker
 }
 
+// docListPageSize : amoxtli pagine doc list (50 documents par défaut).
+var docListPageSize = 200
+
+// maxListedDocuments borne la liste transmise au LLM (une vingtaine de
+// caractères par pièce).
+var maxListedDocuments = 500
+
+// listDocuments renvoie le nom des pièces indexées du marché
+// ({"documents": ["CCTP.pdf", …], "total": n}) : les métadonnées d'amoxtli
+// (id, etag, dates…) coûtent environ 350 caractères par document sans servir
+// au LLM, et elles décrivent la conversion en texte, pas la pièce.
 func (t *Tools) listDocuments(ctx context.Context, params map[string]any) (llm.ToolResult, error) {
 	marketID, err := paramInt(params, "market_id")
 	if err != nil {
@@ -256,15 +334,50 @@ func (t *Tools) listDocuments(ctx context.Context, params map[string]any) (llm.T
 	if err != nil {
 		return errorResult(err.Error()), nil
 	}
+	pieces := readPieces(workspace)
 
-	stdout, stderr, err := t.run(ctx, t.cfg.AmoxtliBin, "-C", workspace, "doc", "list", "--json")
-	if err != nil {
-		if stderr != "" {
-			return errorResult(stderr), nil
+	documents := []string{}
+	total := 0
+	for page := 1; ; page++ {
+		stdout, stderr, err := t.runAmoxtli(ctx, "-C", workspace, "doc", "list", "--json",
+			"--limit", strconv.Itoa(docListPageSize), "--page", strconv.Itoa(page))
+		if err != nil {
+			if stderr != "" {
+				return errorResult(stderr), nil
+			}
+			return errorResult(err.Error()), nil
 		}
+
+		var list struct {
+			Documents []struct {
+				Source string `json:"source"`
+			} `json:"documents"`
+			Total int `json:"total"`
+		}
+		if err := json.Unmarshal([]byte(stdout), &list); err != nil {
+			return errorResult("réponse illisible de amoxtli doc list: " + err.Error()), nil
+		}
+		for _, doc := range list.Documents {
+			documents = append(documents, pieceName(doc.Source, pieces))
+		}
+		total = max(list.Total, len(documents))
+		if len(list.Documents) < docListPageSize || len(documents) >= list.Total || len(documents) >= maxListedDocuments {
+			break
+		}
+	}
+
+	if len(documents) > maxListedDocuments {
+		documents = documents[:maxListedDocuments]
+	}
+	result := map[string]any{"documents": documents, "total": total}
+	if total > len(documents) {
+		result["truncated"] = true
+	}
+	encoded, err := encodeJSON(result)
+	if err != nil {
 		return errorResult(err.Error()), nil
 	}
-	return llm.NewToolResult(stdout), nil
+	return llm.NewToolResult(encoded), nil
 }
 
 func (t *Tools) searchProducts(ctx context.Context, params map[string]any) (llm.ToolResult, error) {
@@ -312,6 +425,32 @@ func (t *Tools) workspace(marketID int) (string, error) {
 		return "", fmt.Errorf("Pas de workspace amoxtli pour le marché %d", marketID)
 	}
 	return workspace, nil
+}
+
+// amoxtli n'admet qu'un processus à la fois par workspace et refuse aussitôt
+// les autres ; l'indexation le tient le temps d'un lot de pièces.
+const amoxtliBusy = "workspace is already in use"
+
+var (
+	amoxtliBusyWait  = 20 * time.Second
+	amoxtliBusyRetry = 200 * time.Millisecond
+)
+
+// runAmoxtli lance amoxtli, et le relance tant qu'un autre processus tient le
+// workspace, au plus amoxtliBusyWait.
+func (t *Tools) runAmoxtli(ctx context.Context, args ...string) (stdout, stderr string, err error) {
+	deadline := time.Now().Add(amoxtliBusyWait)
+	for {
+		stdout, stderr, err = t.run(ctx, t.cfg.AmoxtliBin, args...)
+		if err == nil || !strings.Contains(stderr, amoxtliBusy) || time.Now().After(deadline) {
+			return stdout, stderr, err
+		}
+		select {
+		case <-ctx.Done():
+			return stdout, stderr, err
+		case <-time.After(amoxtliBusyRetry):
+		}
+	}
 }
 
 // run exécute un binaire avec un timeout, en séparant stdout et stderr.

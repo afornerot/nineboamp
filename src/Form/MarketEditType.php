@@ -31,7 +31,7 @@ class MarketEditType extends AbstractType
             ->add('comment', MarkdownType::class, [
                 'label' => 'Commentaire',
                 'required' => false,
-                'attr' => ['rows' => 6],
+                'markdown_height' => 200,
                 'label_attr' => ['class' => 'fw-bold'],
             ])
             ->add('submit', SubmitType::class, [

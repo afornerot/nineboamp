@@ -232,6 +232,36 @@ class AmoxtliServiceTest extends TestCase
         $this->assertSame(['casse.docx'], $this->index(true)['copied']);
     }
 
+    public function testUnreadableSpreadsheetIsNotRetried(): void
+    {
+        file_put_contents($this->marketPath.'/casse.xlsx', 'pas un zip');
+
+        $failure = $this->index()['failed'][0];
+
+        $this->assertStringStartsWith('échec de python3', $failure['reason']);
+        $this->assertArrayNotHasKey('retry', $failure);
+        $this->assertSame([], $this->index()['converted']);
+    }
+
+    public function testFailureUnrelatedToThePieceIsRetried(): void
+    {
+        file_put_contents($this->marketPath.'/notes.txt', 'Notes.');
+        $this->index();
+
+        // Le passage précédent a dépassé un délai : la pièce n'a pas changé depuis.
+        $reportPath = $this->projectDir.'/uploads/amoxtli/1/corpus-report.json';
+        $previous = json_decode((string) file_get_contents($reportPath), true);
+        $previous['failed'] = [['file' => 'notes.txt', 'reason' => 'échec de python3 (délai de 60 s dépassé)', 'retry' => true]];
+        unset($previous['sources']['notes.txt']);
+        file_put_contents($reportPath, json_encode($previous));
+        unlink($this->corpusPath.'/notes.txt');
+
+        $report = $this->index();
+
+        $this->assertSame(['notes.txt'], $report['copied']);
+        $this->assertSame([], $report['failed']);
+    }
+
     public function testPieceRewrittenWithinTheSameSecondIsReindexed(): void
     {
         // Pièce indexée pendant que l'upload l'écrit encore.
@@ -282,6 +312,32 @@ class AmoxtliServiceTest extends TestCase
         $lock->release();
         $this->service->initWorkspace('1');
         $this->assertDirectoryExists($this->projectDir.'/uploads/amoxtli/1/.amoxtli');
+    }
+
+    public function testIndexingWaitsForTheWorkspace(): void
+    {
+        file_put_contents($this->marketPath.'/notes.txt', 'Notes premierenote.');
+        $this->index();
+
+        file_put_contents($this->marketPath.'/ajout.txt', 'Ajout attentenote.');
+        $holder = $this->holdWorkspace(2);
+        $report = $this->index();
+        $holder->wait();
+
+        $this->assertSame([], $report['failed']);
+        $this->assertSame(['ajout.txt'], $this->search('attentenote'));
+    }
+
+    public function testListingWaitsForTheWorkspace(): void
+    {
+        file_put_contents($this->marketPath.'/notes.txt', 'Notes.');
+        $this->index();
+
+        $holder = $this->holdWorkspace(2);
+        $documents = $this->service->listIndexedDocuments('1')['documents'];
+        $holder->wait();
+
+        $this->assertSame(['notes.txt'], array_column($documents, 'filename'));
     }
 
     public function testRebuildStartsFromScratch(): void
@@ -377,6 +433,30 @@ class AmoxtliServiceTest extends TestCase
         $process = new Process(['pandoc', '-f', 'markdown', '-o', $this->marketPath.'/'.$file]);
         $process->setInput($text);
         $process->mustRun();
+    }
+
+    /**
+     * Fait tenir le workspace par un autre processus amoxtli pendant
+     * $seconds secondes, comme une recherche ou une indexation en cours.
+     */
+    private function holdWorkspace(int $seconds): Process
+    {
+        $workspacePath = $this->projectDir.'/uploads/amoxtli/1';
+        $holder = Process::fromShellCommandline(sprintf('sleep %d | /usr/local/bin/amoxtli -C "$WORKSPACE" mcp', $seconds), null, ['WORKSPACE' => $workspacePath]);
+        $holder->start();
+
+        // Le workspace doit être pris avant que le test ne s'en serve ; une
+        // sonde lancée trop tôt le prendrait elle-même.
+        $probe = new Process(['/usr/local/bin/amoxtli', '-C', $workspacePath, 'doc', 'list']);
+        for ($i = 0; $i < 20 && $holder->isRunning(); ++$i) {
+            usleep(100_000);
+            $probe->run();
+            if (str_contains($probe->getErrorOutput(), 'workspace is already in use')) {
+                return $holder;
+            }
+        }
+
+        $this->fail('Le workspace n\'a pas été pris par l\'autre processus amoxtli : '.$holder->getErrorOutput());
     }
 
     /**

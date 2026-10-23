@@ -387,3 +387,59 @@ func TestExecTimeout(t *testing.T) {
 		t.Errorf("timeout attendu comme erreur JSON: %q", got)
 	}
 }
+
+// busyScript simule un workspace tenu par une indexation : amoxtli refuse
+// les refusals premiers appels, puis répond.
+func busyScript(t *testing.T, dir string, refusals int) string {
+	t.Helper()
+	counter := filepath.Join(dir, "calls")
+	return writeScript(t, dir, fmt.Sprintf(`#!/bin/sh
+n=$(cat %[1]q 2>/dev/null || echo 0)
+echo $((n + 1)) > %[1]q
+if [ "$n" -lt %[2]d ]; then
+	echo 'error: workspace is already in use by another amoxtli process (sync, pid 1); only one process can use it at a time' >&2
+	exit 1
+fi
+printf '%%s' '{"hits": 1}'
+`, counter, refusals))
+}
+
+func TestAmoxtliSearchWaitsForTheWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	bin := busyScript(t, dir, 2)
+
+	workspaceRoot := filepath.Join(dir, "ws")
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, "1", ".amoxtli"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tl := New(Config{AmoxtliBin: bin, AmoxtliDir: workspaceRoot})
+
+	got := execute(t, tl, "amoxtli_search", map[string]any{"query": "x", "market_id": float64(1)})
+	if got != `{"hits": 1}` {
+		t.Errorf("amoxtli_search = %q", got)
+	}
+}
+
+func TestAmoxtliBusyWaitIsBounded(t *testing.T) {
+	wait, retry := amoxtliBusyWait, amoxtliBusyRetry
+	amoxtliBusyWait, amoxtliBusyRetry = 300*time.Millisecond, 10*time.Millisecond
+	defer func() { amoxtliBusyWait, amoxtliBusyRetry = wait, retry }()
+
+	dir := t.TempDir()
+	bin := busyScript(t, dir, 1_000_000)
+
+	workspaceRoot := filepath.Join(dir, "ws")
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, "1", ".amoxtli"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tl := New(Config{AmoxtliBin: bin, AmoxtliDir: workspaceRoot})
+
+	start := time.Now()
+	got := execute(t, tl, "list_documents", map[string]any{"market_id": float64(1)})
+	if !strings.Contains(got, "workspace is already in use") {
+		t.Errorf("l'erreur d'amoxtli doit remonter: %q", got)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("attente de %s, bornée à %s attendue", elapsed, amoxtliBusyWait)
+	}
+}

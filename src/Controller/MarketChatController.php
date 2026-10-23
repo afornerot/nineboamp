@@ -351,7 +351,7 @@ class MarketChatController extends AbstractController
         $process->setTimeout(30);
 
         try {
-            $process->run();
+            $this->amoxtliService->runAmoxtli($process);
         } catch (ProcessFailedException) {
             return ['sections' => [], 'sources' => []];
         }

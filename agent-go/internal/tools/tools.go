@@ -102,7 +102,7 @@ func (t *Tools) amoxtliSearch(ctx context.Context, params map[string]any) (llm.T
 		return errorResult(err.Error()), nil
 	}
 
-	stdout, stderr, err := t.run(ctx, t.cfg.AmoxtliBin, "-C", workspace, "search", query, "--json", "-n", strconv.Itoa(limit))
+	stdout, stderr, err := t.runAmoxtli(ctx, "-C", workspace, "search", query, "--json", "-n", strconv.Itoa(limit))
 	if err != nil {
 		if stderr != "" {
 			return errorResult(stderr), nil
@@ -264,7 +264,7 @@ func (t *Tools) listDocuments(ctx context.Context, params map[string]any) (llm.T
 
 	documents := []json.RawMessage{}
 	for page := 1; ; page++ {
-		stdout, stderr, err := t.run(ctx, t.cfg.AmoxtliBin, "-C", workspace, "doc", "list", "--json",
+		stdout, stderr, err := t.runAmoxtli(ctx, "-C", workspace, "doc", "list", "--json",
 			"--limit", strconv.Itoa(docListPageSize), "--page", strconv.Itoa(page))
 		if err != nil {
 			if stderr != "" {
@@ -338,6 +338,32 @@ func (t *Tools) workspace(marketID int) (string, error) {
 		return "", fmt.Errorf("Pas de workspace amoxtli pour le marché %d", marketID)
 	}
 	return workspace, nil
+}
+
+// amoxtli n'admet qu'un processus à la fois par workspace et refuse aussitôt
+// les autres ; l'indexation le tient le temps d'un lot de pièces.
+const amoxtliBusy = "workspace is already in use"
+
+var (
+	amoxtliBusyWait  = 20 * time.Second
+	amoxtliBusyRetry = 200 * time.Millisecond
+)
+
+// runAmoxtli lance amoxtli, et le relance tant qu'un autre processus tient le
+// workspace, au plus amoxtliBusyWait.
+func (t *Tools) runAmoxtli(ctx context.Context, args ...string) (stdout, stderr string, err error) {
+	deadline := time.Now().Add(amoxtliBusyWait)
+	for {
+		stdout, stderr, err = t.run(ctx, t.cfg.AmoxtliBin, args...)
+		if err == nil || !strings.Contains(stderr, amoxtliBusy) || time.Now().After(deadline) {
+			return stdout, stderr, err
+		}
+		select {
+		case <-ctx.Done():
+			return stdout, stderr, err
+		case <-time.After(amoxtliBusyRetry):
+		}
+	}
 }
 
 // run exécute un binaire avec un timeout, en séparant stdout et stderr.

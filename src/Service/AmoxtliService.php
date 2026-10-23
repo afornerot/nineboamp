@@ -26,7 +26,7 @@ use Symfony\Component\Process\Process;
  *     copied: list<string>,
  *     removed: list<string>,
  *     unsupported: list<string>,
- *     failed: list<array{file: string, reason: string}>,
+ *     failed: list<array{file: string, reason: string, retry?: true}>,
  *     sources: array<string, string>,
  *     fingerprints: array<string, string>,
  * }
@@ -47,6 +47,20 @@ class AmoxtliService
 
     /** Délai d'amoxtli sync par fichier (son défaut) : la synchro entière est bornée par leur somme. */
     private const SYNC_FILE_TIMEOUT = 300;
+
+    /**
+     * amoxtli n'admet qu'un processus à la fois par workspace et refuse
+     * aussitôt les autres. Une recherche le tient peu de temps, l'indexation
+     * le temps d'un lot : on attend qu'il se libère, en secondes.
+     */
+    private const BUSY_ERROR = 'workspace is already in use';
+    private const READ_WAIT = 20;
+    private const WRITE_WAIT = 60;
+
+    /** Lot d'entrées indexées en un appel : quelques secondes d'indexation en texte intégral. */
+    private const ADD_BATCH_SIZE = 1_000_000;
+    private const ADD_BATCH_FILES = 50;
+    private const ADD_BATCH_PAUSE = 500_000;
 
     /**
      * Toutes les feuilles d'un classeur (.xlsx, .xls) → CSV, chacune précédée
@@ -206,24 +220,17 @@ class AmoxtliService
             $this->createWorkspace($id);
             $report = $this->buildCorpus($id);
 
-            // amoxtli garde la version précédente d'un fichier qu'il ne sait
-            // pas lire : retirée du corpus, l'entrée quitte l'index au sync suivant.
-            while ([] !== $failed = $this->syncCorpus($workspacePath, $corpusPath, count($report['sources']))) {
-                $removed = false;
-                foreach ($failed as $entry => $error) {
-                    $removed = $removed || is_file($corpusPath.'/'.$entry);
-                    $fs->remove($corpusPath.'/'.$entry);
-                    $report['failed'][] = [
-                        'file' => $report['sources'][$entry] ?? $entry,
-                        'reason' => sprintf('illisible par amoxtli (%s)', $error),
-                    ];
-                    unset($report['sources'][$entry]);
-                }
+            $this->addChangedEntries($report, $workspacePath, $corpusPath, $lock);
 
-                if (!$removed) {
-                    break;
+            // Le sync retire de l'index les entrées sorties du corpus, et ne
+            // refait pas celles qui viennent d'être indexées.
+            do {
+                $lock->refresh();
+                $removed = false;
+                foreach ($this->syncCorpus($workspacePath, $corpusPath, count($report['sources'])) as $entry => $error) {
+                    $removed = $this->rejectEntry($report, $corpusPath, $entry, $error) || $removed;
                 }
-            }
+            } while ($removed);
 
             // Un nom de pièce qui n'est pas en UTF-8 ne doit pas empêcher d'écrire le rapport.
             $json = json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR);
@@ -265,8 +272,9 @@ class AmoxtliService
     /**
      * Copie ou convertit dans le corpus les pièces nouvelles ou modifiées, et
      * supprime les entrées dont la pièce a disparu. Un échec de conversion
-     * n'arrête pas le marché : la pièce est classée dans "failed", et n'est
-     * retentée que si elle change (ou à la réindexation).
+     * n'arrête pas le marché : la pièce est classée dans "failed". Refusée
+     * pour son contenu, elle n'est retentée que si elle change (ou à la
+     * réindexation) ; après un autre échec ("retry"), au passage suivant.
      *
      * À appeler sous le verrou du marché, donc seulement depuis indexMarket().
      *
@@ -283,7 +291,8 @@ class AmoxtliService
         // Le rapport précédent dit quelle version de chaque pièce le corpus contient.
         $previous = $this->readReport($id);
         $fingerprints = $previous['fingerprints'] ?? [];
-        $failures = array_column($previous['failed'] ?? [], 'reason', 'file');
+        // Un échec qui ne tient pas à la pièce (délai, outil absent…) est retenté.
+        $failures = array_column(array_filter($previous['failed'] ?? [], fn (array $failure): bool => !($failure['retry'] ?? false)), 'reason', 'file');
 
         $report = ['converted' => [], 'copied' => [], 'removed' => [], 'unsupported' => [], 'failed' => [], 'sources' => [], 'fingerprints' => []];
         $converters = $this->converters();
@@ -335,7 +344,7 @@ class AmoxtliService
                 } else {
                     $text = $converter($source);
                     if (!preg_match('/\S/', $text)) {
-                        throw new \RuntimeException('aucun texte extrait');
+                        throw new \UnexpectedValueException('aucun texte extrait');
                     }
                     $fs->dumpFile($target, $text);
                     $report['converted'][] = $file;
@@ -343,7 +352,8 @@ class AmoxtliService
             } catch (\Throwable $e) {
                 // Sans entrée attendue, une version précédente est retirée avec les orphelins.
                 unset($report['sources'][$entry]);
-                $report['failed'][] = ['file' => $file, 'reason' => $e->getMessage()];
+                // Les convertisseurs lèvent UnexpectedValueException quand la pièce elle-même est en cause.
+                $report['failed'][] = ['file' => $file, 'reason' => $e->getMessage()] + ($e instanceof \UnexpectedValueException ? [] : ['retry' => true]);
                 $this->logger->warning('amoxtli : pièce {file} du marché {id} non indexée : {reason}', [
                     'file' => $file,
                     'id' => $id,
@@ -390,7 +400,7 @@ class AmoxtliService
             $result['unindexed'][] = ['file' => $file, 'reason' => 'format non pris en charge'];
         }
         foreach ($report['failed'] ?? [] as $failure) {
-            $result['unindexed'][] = $failure;
+            $result['unindexed'][] = ['file' => $failure['file'], 'reason' => $failure['reason']];
         }
 
         // amoxtli pagine la liste (50 documents par défaut).
@@ -407,7 +417,7 @@ class AmoxtliService
             $process->setTimeout(30);
 
             try {
-                $process->run();
+                $this->runAmoxtli($process);
             } catch (\Throwable) {
                 return $result;
             }
@@ -484,6 +494,25 @@ class AmoxtliService
     }
 
     /**
+     * Lance une commande amoxtli, et la relance tant qu'un autre processus
+     * tient le workspace, au plus $wait secondes.
+     */
+    public function runAmoxtli(Process $process, int $wait = self::READ_WAIT): void
+    {
+        $deadline = microtime(true) + $wait;
+
+        while (true) {
+            $process->run();
+
+            if ($process->isSuccessful() || !str_contains($process->getErrorOutput(), self::BUSY_ERROR) || microtime(true) >= $deadline) {
+                return;
+            }
+
+            usleep(200_000);
+        }
+    }
+
+    /**
      * Entrée du corpus d'une source amoxtli (file:///Cahier%20des%20charges.pdf.txt).
      */
     private function entryOf(string $source): string
@@ -547,7 +576,7 @@ class AmoxtliService
     }
 
     /**
-     * @return array{unsupported?: list<string>, failed?: list<array{file: string, reason: string}>, sources?: array<string, string>, fingerprints?: array<string, string>}
+     * @return array{unsupported?: list<string>, failed?: list<array{file: string, reason: string, retry?: true}>, sources?: array<string, string>, fingerprints?: array<string, string>}
      */
     private function readReport(string $id): array
     {
@@ -584,7 +613,7 @@ class AmoxtliService
         ]);
 
         $process->setTimeout(60 + self::SYNC_FILE_TIMEOUT * max(1, $entries));
-        $process->run();
+        $this->runAmoxtli($process, self::WRITE_WAIT);
 
         $data = json_decode($process->getOutput(), true);
         $failed = [];
@@ -602,8 +631,117 @@ class AmoxtliService
     }
 
     /**
+     * Indexe les entrées nouvelles ou modifiées du corpus par lots : une
+     * recherche attend au plus la fin d'un lot. Chaque appel d'amoxtli coûte
+     * environ une seconde : une entrée par appel rendrait l'indexation d'un
+     * marché de cent pièces dix fois plus lente.
+     *
+     * @param CorpusReport $report
+     */
+    private function addChangedEntries(array &$report, string $workspacePath, string $corpusPath, SharedLockInterface $lock): void
+    {
+        $changed = array_flip([...$report['converted'], ...$report['copied']]);
+
+        $batches = [];
+        $batch = [];
+        $size = 0;
+        foreach ($report['sources'] as $entry => $file) {
+            if (!isset($changed[$file])) {
+                continue;
+            }
+
+            $batch[] = $entry;
+            $size += (int) filesize($corpusPath.'/'.$entry);
+            if ($size >= self::ADD_BATCH_SIZE || count($batch) >= self::ADD_BATCH_FILES) {
+                $batches[] = $batch;
+                $batch = [];
+                $size = 0;
+            }
+        }
+        if ([] !== $batch) {
+            $batches[] = $batch;
+        }
+
+        foreach ($batches as $batch) {
+            // Le verrou du marché expire : chaque lot le prolonge.
+            $lock->refresh();
+            foreach ($this->addEntries($workspacePath, $corpusPath, $batch) as $entry => $error) {
+                $this->rejectEntry($report, $corpusPath, $entry, $error);
+            }
+
+            // Sans pause, le lot suivant reprendrait le workspace avant les
+            // recherches qui attendent, relancées toutes les 200 ms.
+            usleep(self::ADD_BATCH_PAUSE);
+        }
+    }
+
+    /**
+     * Indexe des entrées du corpus, à la place de leur version déjà indexée.
+     *
+     * @param list<string> $entries
+     *
+     * @return array<string, string> entrée du corpus → erreur amoxtli
+     */
+    private function addEntries(string $workspacePath, string $corpusPath, array $entries): array
+    {
+        $process = new Process([
+            $this->binaryPath,
+            '--json',
+            '-C', $workspacePath,
+            'add',
+            ...array_map(fn (string $entry): string => $corpusPath.'/'.$entry, $entries),
+            '--base-dir', $corpusPath,
+            '--timeout', self::SYNC_FILE_TIMEOUT.'s',
+        ]);
+
+        $process->setTimeout(60 + self::SYNC_FILE_TIMEOUT * count($entries));
+        $this->runAmoxtli($process, self::WRITE_WAIT);
+
+        $data = json_decode($process->getOutput(), true);
+        $failed = [];
+        foreach (is_array($data) ? $data : [] as $result) {
+            if (is_string($result['file'] ?? null) && 'succeeded' !== ($result['status'] ?? null)) {
+                $failed[substr($result['file'], strlen($corpusPath) + 1)] = (string) ($result['error'] ?? $result['status'] ?? 'erreur inconnue');
+            }
+        }
+
+        if (!$process->isSuccessful() && [] === $failed) {
+            throw new ProcessFailedException($process);
+        }
+
+        return $failed;
+    }
+
+    /**
+     * Retire du corpus une entrée qu'amoxtli n'a pas su indexer : il en
+     * garde la version précédente, qui quitte l'index au sync suivant.
+     *
+     * @param CorpusReport $report
+     *
+     * @return bool si l'entrée était encore dans le corpus
+     */
+    private function rejectEntry(array &$report, string $corpusPath, string $entry, string $error): bool
+    {
+        $present = is_file($corpusPath.'/'.$entry);
+        (new Filesystem())->remove($corpusPath.'/'.$entry);
+
+        // "exit status 63" : le convertisseur d'amoxtli (pandoc) a refusé le
+        // fichier ; un délai dépassé ou une erreur d'embeddings ne dit rien de la pièce.
+        $rejected = preg_match('/^exit status (\d+)$/', $error, $match) && $this->rejectsFile((int) $match[1]);
+
+        $report['failed'][] = [
+            'file' => $report['sources'][$entry] ?? $entry,
+            'reason' => sprintf('illisible par amoxtli (%s)', $error),
+        ] + ($rejected ? [] : ['retry' => true]);
+        unset($report['sources'][$entry]);
+
+        return $present;
+    }
+
+    /**
      * Convertisseurs en texte, par extension en minuscules. Ils lèvent une
-     * exception dont le message dit pourquoi la pièce n'est pas indexée.
+     * exception dont le message dit pourquoi la pièce n'est pas indexée :
+     * UnexpectedValueException si la pièce elle-même est en cause.
      *
      * @return array<string, \Closure(string): string>
      */
@@ -624,7 +762,7 @@ class AmoxtliService
 
         $chars = strlen((string) preg_replace('/\s+/', '', $text));
         if (0 === $chars || ($chars < self::PDF_MIN_CHARS && filesize($file) > self::PDF_SCAN_MIN_SIZE)) {
-            throw new \RuntimeException('PDF image, OCR requis');
+            throw new \UnexpectedValueException('PDF image, OCR requis');
         }
 
         return $text;
@@ -680,11 +818,21 @@ class AmoxtliService
         if (!$process->isSuccessful()) {
             $lines = preg_split('/\R/', trim($process->getErrorOutput())) ?: [];
             $error = trim((string) end($lines));
+            $message = sprintf('échec de %s (%s)', $command[0], '' !== $error ? mb_substr($error, 0, 200) : 'code '.$process->getExitCode());
 
-            throw new \RuntimeException(sprintf('échec de %s (%s)', $command[0], '' !== $error ? mb_substr($error, 0, 200) : 'code '.$process->getExitCode()));
+            throw $this->rejectsFile($process->getExitCode()) ? new \UnexpectedValueException($message) : new \RuntimeException($message);
         }
 
         return $process->getOutput();
+    }
+
+    /**
+     * Un convertisseur qui sort en erreur a refusé le fichier, sauf s'il est
+     * introuvable (126, 127) ou a été tué par un signal (au-delà de 128).
+     */
+    private function rejectsFile(?int $exitCode): bool
+    {
+        return null !== $exitCode && $exitCode >= 1 && $exitCode <= 125;
     }
 
     /**

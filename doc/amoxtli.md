@@ -49,15 +49,32 @@ Déclenchée :
 
    Le rapport garde la date et la taille de chaque pièce : une entrée n'est
    refaite que si sa pièce a changé (remplacement sous le même nom compris,
-   ou pièce indexée pendant que l'upload l'écrivait encore). Une pièce en
-   échec n'est retentée que si elle change, ou à la réindexation. Les entrées
-   dont la pièce a disparu sont supprimées.
-4. **Sync** : `amoxtli sync corpus/ --base-dir corpus/`, sans `--no-wait` pour
-   récupérer le résultat de chaque fichier. amoxtli abandonne un fichier au
-   bout de 5 min ; la synchro entière n'est coupée qu'au-delà de 5 min par
-   entrée du corpus. Un fichier qu'amoxtli ne sait pas lire (ex. `.docx`
-   corrompu) est signalé sans faire échouer le marché, et retiré du corpus
-   puis de l'index : amoxtli y garderait sinon sa version précédente.
+   ou pièce indexée pendant que l'upload l'écrivait encore). Une pièce refusée
+   pour son contenu (PDF image, aucun texte, fichier refusé par son
+   convertisseur ou celui d'amoxtli) n'est retentée que si elle change, ou à
+   la réindexation. Les autres échecs ne disent rien de la pièce (délai
+   dépassé, outil absent, processus tué, erreur d'embeddings) : elle est
+   retentée au passage suivant. Les entrées dont la pièce a disparu sont
+   supprimées.
+4. **Indexation** : amoxtli n'admet qu'un processus à la fois par workspace
+   et refuse aussitôt les autres (« workspace is already in use »). Les
+   entrées nouvelles ou modifiées sont donc indexées par lots (`amoxtli add`,
+   au plus 1 Mo ou 50 fichiers, quelques secondes chacun), avec une pause de
+   0,5 s entre deux lots pour laisser passer les recherches. Puis
+   `amoxtli sync corpus/ --base-dir corpus/` retire de l'index les entrées
+   sorties du corpus. Chaque lot prolonge le verrou du marché.
+
+   Ni `add` ni `sync` ne passent `--no-wait` : amoxtli rendrait la main en
+   laissant l'essentiel des fichiers en attente, sans le résultat de chacun.
+   amoxtli abandonne un fichier au bout de 5 min. Un fichier qu'il
+   ne sait pas lire (ex. `.docx` corrompu) est signalé sans faire échouer le
+   marché, et retiré du corpus puis de l'index : amoxtli y garderait sinon sa
+   version précédente.
+
+   Les recherches et listes de documents (chat PHP, onglet du marché, outils
+   de l'agent Go) relancent la commande tant que le workspace est pris, au
+   plus 20 s ; l'indexation attend de même une recherche en cours, au plus
+   60 s.
 5. **Rapport** : `uploads/amoxtli/{id}/corpus-report.json` (pièces converties,
    copiées, supprimées, non prises en charge, en échec, et version de chaque
    pièce). L'onglet « Documents indexés » de la page marché et les sources du

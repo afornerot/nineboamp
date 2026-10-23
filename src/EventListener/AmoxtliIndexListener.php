@@ -44,9 +44,15 @@ class AmoxtliIndexListener implements EventSubscriberInterface
             return;
         }
 
-        $id = $route === 'bninefiles_files_delete'
-            ? $request->attributes->get('id')
-            : $request->query->get('id');
+        // L'upload passe domaine et id dans la query, la suppression dans la route.
+        $parameters = $route === 'bninefiles_files_delete' ? $request->attributes : $request->query;
+
+        // Seules les pièces des marchés sont indexées, pas les avatars ni les logos.
+        if ($parameters->get('domain') !== 'boamp') {
+            return;
+        }
+
+        $id = $parameters->get('id');
 
         if ($id) {
             $this->messageBus->dispatch(new IndexMarketMessage((string) $id));

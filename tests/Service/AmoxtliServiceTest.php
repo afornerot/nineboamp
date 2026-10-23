@@ -140,6 +140,21 @@ class AmoxtliServiceTest extends TestCase
         $this->assertSame(['bpu.xlsx.txt', 'dqe.xls.txt'], $this->search('secondfeuillet'));
     }
 
+    public function testSpreadsheetsGiveTheDisplayedValues(): void
+    {
+        // 12 × 10,1 vaut 121.19999999999999 en flottant ; la date est stockée en numéro de série.
+        copy(self::FIXTURES.'/formules.xlsx', $this->marketPath.'/bpu.xlsx');
+        copy(self::FIXTURES.'/formules.xls', $this->marketPath.'/dqe.xls');
+
+        $this->index();
+
+        foreach (['bpu.xlsx.txt', 'dqe.xls.txt'] as $entry) {
+            $text = (string) file_get_contents($this->corpusPath.'/'.$entry);
+            $this->assertStringContainsString('"Prestation","12","10.1","121.2","2026-01-15"', $text, $entry);
+            $this->assertStringContainsString('"Total","","","121.2"', $text, $entry);
+        }
+    }
+
     public function testDocIsConverted(): void
     {
         copy(self::FIXTURES.'/acte.doc', $this->marketPath.'/AE.doc');
@@ -191,6 +206,62 @@ class AmoxtliServiceTest extends TestCase
 
         $this->assertSame(['CCAP.pdf'], $report['converted']);
         $this->assertSame(['CCAP.pdf.txt'], $this->search('reconstruiteclause'));
+    }
+
+    public function testFindLegacyTxt(): void
+    {
+        foreach (['CCTP.pdf', 'CCTP.txt', 'BPU.xlsx', 'BPU.txt', 'Offre.PDF', 'Offre.txt', 'notes.txt'] as $file) {
+            touch($this->marketPath.'/'.$file);
+        }
+        // L'ancienne indexation ne parcourait que la racine du dossier.
+        mkdir($this->marketPath.'/sous-dossier');
+        touch($this->marketPath.'/sous-dossier/annexe.pdf');
+        touch($this->marketPath.'/sous-dossier/annexe.txt');
+
+        $this->assertSame(['BPU.txt' => 'BPU.xlsx', 'CCTP.txt' => 'CCTP.pdf'], $this->service->findLegacyTxt('1'));
+    }
+
+    public function testMarketWithoutPiecesFolderLeavesTheIndex(): void
+    {
+        $this->pdf('CCAP.pdf', 'Clause dossiersupprime.');
+        $this->index();
+
+        (new Filesystem())->remove($this->marketPath);
+        $report = $this->index();
+
+        $this->assertSame(['CCAP.pdf.txt'], $report['removed']);
+        $this->assertSame([], $this->search('dossiersupprime'));
+
+        $this->assertNull($this->service->indexMarket('1', true));
+        $this->assertDirectoryDoesNotExist($this->projectDir.'/uploads/amoxtli/1/.amoxtli');
+    }
+
+    public function testMarketWithoutPiecesNorIndexIsLeftAlone(): void
+    {
+        $this->assertNull($this->service->indexMarket('2'));
+        $this->assertDirectoryDoesNotExist($this->projectDir.'/uploads/amoxtli/2');
+    }
+
+    public function testFileNameNotInUtf8IsReported(): void
+    {
+        file_put_contents($this->marketPath."/\xE9t\xE9.zip", 'PK');
+        file_put_contents($this->marketPath.'/notes.txt', 'Notes latinnote.');
+
+        $this->index();
+
+        $this->assertSame(["\u{FFFD}t\u{FFFD}.zip"], array_column($this->service->listIndexedDocuments('1')['unindexed'], 'file'));
+    }
+
+    public function testEveryDocumentIsListed(): void
+    {
+        // amoxtli doc list s'arrête à 50 documents par page par défaut.
+        for ($i = 1; $i <= 51; ++$i) {
+            file_put_contents(sprintf('%s/piece-%02d.txt', $this->marketPath, $i), 'Pièce '.$i);
+        }
+
+        $this->index();
+
+        $this->assertCount(51, $this->indexedFiles());
     }
 
     /**

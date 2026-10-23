@@ -53,10 +53,17 @@ class AmoxtliReindexCommand extends Command
             return Command::FAILURE;
         }
 
-        // Les marchés qui ont des pièces, avec ou sans workspace amoxtli.
-        $marketIds = $all
-            ? array_map('basename', glob($this->amoxtliService->getProjectDir().'/uploads/boamp/*', GLOB_ONLYDIR) ?: [])
-            : [$marketId];
+        // Les marchés qui ont des pièces ou un workspace : l'index d'un marché
+        // dont le dossier de pièces a disparu est supprimé.
+        $marketIds = [$marketId];
+        if ($all) {
+            $uploads = $this->amoxtliService->getProjectDir().'/uploads';
+            $marketIds = array_values(array_unique(array_map('basename', array_merge(
+                glob($uploads.'/boamp/*', GLOB_ONLYDIR) ?: [],
+                glob($uploads.'/amoxtli/*', GLOB_ONLYDIR) ?: [],
+            ))));
+            sort($marketIds, SORT_NATURAL);
+        }
 
         $failed = 0;
         foreach ($marketIds as $id) {
@@ -87,7 +94,7 @@ class AmoxtliReindexCommand extends Command
 
         $report = $this->amoxtliService->indexMarket($marketId, true);
         if (null === $report) {
-            $io->text('Aucun dossier de pièces pour ce marché.');
+            $io->text('Aucun dossier de pièces pour ce marché : pas d\'index.');
             return;
         }
 
@@ -106,40 +113,24 @@ class AmoxtliReindexCommand extends Command
     }
 
     /**
-     * L'ancienne indexation écrivait X.txt à côté de X.pdf et X.xlsx, à la
-     * racine du dossier du marché. Un .txt déposé par un utilisateur sous le
-     * même nom de base serait supprimé lui aussi : relire d'abord --dry-run.
+     * Supprime les .txt de l'ancienne indexation (AmoxtliService::findLegacyTxt()).
+     * Un .txt déposé par un utilisateur sous le même nom de base serait
+     * supprimé lui aussi : relire d'abord --dry-run.
      */
     private function purgeLegacyTxt(SymfonyStyle $io, string $marketId, bool $dryRun): void
     {
-        $marketPath = $this->amoxtliService->getMarketPath($marketId);
-
-        $converted = [];
-        $txtFiles = [];
-        foreach (glob($marketPath.'/*') ?: [] as $path) {
-            if (!is_file($path)) {
-                continue;
-            }
-            $info = pathinfo($path);
-            $extension = strtolower($info['extension'] ?? '');
-            if (in_array($extension, ['pdf', 'xlsx'], true)) {
-                $converted[$info['filename']] = true;
-            } elseif ('txt' === $extension) {
-                $txtFiles[$info['filename']] = $path;
-            }
-        }
-
-        $legacy = array_values(array_intersect_key($txtFiles, $converted));
+        $legacy = array_keys($this->amoxtliService->findLegacyTxt($marketId));
         if ([] === $legacy) {
             return;
         }
 
         $io->text(sprintf('Marché %s : %d .txt %s', $marketId, count($legacy), $dryRun ? 'à supprimer' : 'supprimé(s)'));
-        $io->listing(array_map('basename', $legacy));
+        $io->listing($legacy);
 
         if (!$dryRun) {
-            foreach ($legacy as $path) {
-                unlink($path);
+            $marketPath = $this->amoxtliService->getMarketPath($marketId);
+            foreach ($legacy as $file) {
+                unlink($marketPath.'/'.$file);
             }
         }
     }

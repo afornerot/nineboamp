@@ -31,7 +31,8 @@ Déclenchée :
 Étapes de `AmoxtliService::indexMarket()`, sous un verrou
 `amoxtli-market-{id}` (le worker et la commande peuvent viser le même marché) :
 
-1. **Vérification** : sans dossier `uploads/boamp/{id}/`, rien à faire.
+1. **Vérification** : sans dossier `uploads/boamp/{id}/`, le marché n'a pas
+   de pièces. S'il a un index, celui-ci est vidé ; sinon rien n'est créé.
 2. **Workspace** : `amoxtli init` dans `uploads/amoxtli/{id}/` s'il n'existe
    pas encore.
 3. **Corpus** (`buildCorpus()`) : parcours récursif des pièces, en ignorant les
@@ -64,7 +65,7 @@ Un passage sans changement prend environ 1 s.
 | `.txt`, `.md`, `.docx`, `.odt`, `.rtf`, `.html`, `.rst`, `.epub`, `.tex` | lus par amoxtli (pandoc), copiés tels quels |
 | `.pdf` | `pdftotext -layout`. Un PDF sans texte (ou de plus de 50 Ko avec moins de 100 caractères) est signalé « PDF image, OCR requis » |
 | `.doc` | `catdoc`, ou `antiword` pour les `.doc` que catdoc refuse (ceux écrits par LibreOffice) |
-| `.xlsx`, `.xls` | toutes les feuilles en CSV, chacune précédée de `## Feuille : <nom>` (openpyxl, xlrd) |
+| `.xlsx`, `.xls` | toutes les feuilles en CSV, chacune précédée de `## Feuille : <nom>` (openpyxl, xlrd). Les cellules donnent la valeur affichée : résultat des formules (celui enregistré par le tableur), nombres sans `.0`, dates en `AAAA-MM-JJ` |
 | `.csv` | copié en `.csv.txt` (converti en UTF-8 s'il est en Windows-1252) |
 | autres (`.pptx`, `.ods`, `.zip`, images…) | non indexés, signalés « format non pris en charge » |
 
@@ -80,25 +81,27 @@ docker compose exec nineboamp bin/console app:amoxtli:reindex --all
 ```
 
 Supprime l'index et le corpus du marché, les reconstruit et affiche le rapport.
-`--all` parcourt `uploads/boamp/*` : les marchés qui ont des pièces sans
-workspace sont inclus.
+`--all` parcourt `uploads/boamp/*` et `uploads/amoxtli/*` : les marchés qui
+ont des pièces sans workspace sont inclus, et l'index d'un marché dont le
+dossier de pièces a disparu est supprimé.
 
 ### Migration depuis l'ancienne indexation
 
 L'ancienne version écrivait les conversions (`X.txt` pour `X.pdf` ou
-`X.xlsx`) dans le dossier des pièces. Ces fichiers apparaissent dans la liste
-des fichiers du marché et seraient indexés comme des pièces déposées :
+`X.xlsx`, à la racine du dossier du marché) dans le dossier des pièces. Ces
+fichiers apparaissent dans la liste des fichiers du marché, et la nouvelle
+indexation les indexe comme des pièces déposées, en double de leur pièce. À
+faire juste après le déploiement, dans cet ordre :
 
 ```bash
-# 1. Relire la liste : un .txt déposé volontairement avec le même nom de base serait supprimé aussi
+# 1. Faire tourner le worker Messenger avec le nouveau code : l'ancien écrirait
+#    encore des .txt à chaque upload (la boucle de misc/script/reconfigure.sh le relance)
+docker compose exec nineboamp bin/console messenger:stop-workers
+# 2. Relire la liste : un .txt déposé volontairement avec le même nom de base serait supprimé aussi
 docker compose exec nineboamp bin/console app:amoxtli:reindex --all --purge-legacy-txt --dry-run
-# 2. Supprimer ces .txt et réindexer
+# 3. Supprimer ces .txt et réindexer : les doublons indexés entre-temps disparaissent
 docker compose exec nineboamp bin/console app:amoxtli:reindex --all --purge-legacy-txt
 ```
-
-Le worker Messenger doit tourner avec le nouveau code : après un déploiement
-sans redémarrage du conteneur, `bin/console messenger:stop-workers` (la boucle
-de `misc/script/reconfigure.sh` le relance).
 
 ## Chat IA
 

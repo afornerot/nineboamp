@@ -9,6 +9,7 @@ use Symfony\Component\Finder\Finder;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\Lock\LockFactory;
 use Symfony\Component\Process\Exception\ProcessFailedException;
+use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\Process;
 
 /**
@@ -40,33 +41,62 @@ class AmoxtliService
     private const PDF_MIN_CHARS = 100;
     private const PDF_SCAN_MIN_SIZE = 50_000;
 
+    private const DOC_LIST_PAGE_SIZE = 200;
+
     /**
      * Toutes les feuilles d'un classeur (.xlsx, .xls) → CSV, chacune précédée
      * de "## Feuille : <nom>", sans lignes vides ni cellules vides en fin de
      * ligne : la mise en forme d'un classeur peut étendre la plage utilisée à
      * des milliers de cellules vides (ex. 1031 colonnes, 2,8 Mo de "","",…
      * pour 170 Ko de .xlsx), que la recherche renvoie ensuite au LLM.
+     *
+     * Les cellules donnent la valeur affichée par le tableur : résultat des
+     * formules, nombres à 15 chiffres significatifs sans ".0", dates en
+     * AAAA-MM-JJ (xlrd les rend en numéros de série).
      */
     private const SPREADSHEET_TO_CSV = <<<'PY'
-        import csv, sys
+        import csv, datetime, sys
 
         path = sys.argv[1]
         out = csv.writer(sys.stdout, quoting=csv.QUOTE_ALL, lineterminator="\n")
 
+        def xls_cell(c, datemode):
+            import xlrd
+            if c.ctype == xlrd.XL_CELL_DATE:
+                value = xlrd.xldate_as_datetime(c.value, datemode)
+                return value.time() if c.value < 1 else value
+            if c.ctype == xlrd.XL_CELL_BOOLEAN:
+                return bool(c.value)
+            if c.ctype == xlrd.XL_CELL_ERROR:
+                return xlrd.error_text_from_code.get(c.value, "")
+            return c.value
+
         def sheets():
             if path.lower().endswith(".xls"):
                 import xlrd
-                for sheet in xlrd.open_workbook(path).sheets():
-                    yield sheet.name, (sheet.row_values(i) for i in range(sheet.nrows))
+                book = xlrd.open_workbook(path)
+                for sheet in book.sheets():
+                    yield sheet.name, ([xls_cell(c, book.datemode) for c in sheet.row(i)] for i in range(sheet.nrows))
             else:
                 import openpyxl
-                for sheet in openpyxl.load_workbook(path).worksheets:
+                # Sans data_only, openpyxl rend le texte des formules (=D5*E5) au lieu de leur résultat.
+                for sheet in openpyxl.load_workbook(path, data_only=True).worksheets:
                     yield sheet.title, sheet.values
+
+        def text(v):
+            if v is None:
+                return ""
+            if isinstance(v, float):
+                v = float("%.15g" % v)
+                return int(v) if v.is_integer() else v
+            if isinstance(v, datetime.datetime):
+                return v.date().isoformat() if v.time() == datetime.time() else v.isoformat(sep=" ")
+            return v
 
         for name, rows in sheets():
             lines = []
             for row in rows:
-                cells = ["" if v is None else v for v in row]
+                cells = [text(v) for v in row]
                 while cells and cells[-1] == "":
                     cells.pop()
                 if cells:
@@ -137,6 +167,12 @@ class AmoxtliService
         $process->run();
 
         if (!$process->isSuccessful()) {
+            // La page du marché initialise le workspace sans le verrou de
+            // indexMarket() : l'autre processus a pu le créer entre-temps.
+            if (is_dir($workspacePath.'/.amoxtli')) {
+                return;
+            }
+
             throw new ProcessFailedException($process);
         }
 
@@ -147,11 +183,14 @@ class AmoxtliService
      * Met à jour le corpus du marché puis l'index. Avec $rebuild, l'index et le
      * corpus sont d'abord supprimés.
      *
-     * @return CorpusReport|null null si amoxtli est absent ou si le marché n'a pas de dossier
+     * Un marché sans dossier de pièces n'a rien à indexer : un index existant
+     * est vidé, sinon rien n'est créé.
+     *
+     * @return CorpusReport|null null si amoxtli est absent, ou si le marché n'a ni pièces ni index
      */
     public function indexMarket(string $id, bool $rebuild = false): ?array
     {
-        if (!$this->isAvailable() || !is_dir($this->getMarketPath($id))) {
+        if (!$this->isAvailable()) {
             return null;
         }
 
@@ -167,6 +206,10 @@ class AmoxtliService
                 (new Filesystem())->remove([$workspacePath.'/.amoxtli', $corpusPath, $this->getReportPath($id)]);
             }
 
+            if (!is_dir($this->getMarketPath($id)) && !is_dir($workspacePath.'/.amoxtli')) {
+                return null;
+            }
+
             $this->initWorkspace($id);
             $report = $this->buildCorpus($id);
 
@@ -177,7 +220,10 @@ class AmoxtliService
                 ];
             }
 
-            file_put_contents($this->getReportPath($id), json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+            // Un nom de pièce qui n'est pas en UTF-8 ne doit pas empêcher d'écrire le rapport.
+            $json = json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR);
+            // dumpFile() écrit puis renomme : la page du marché ne lit jamais un rapport à moitié écrit.
+            (new Filesystem())->dumpFile($this->getReportPath($id), $json);
 
             return $report;
         } finally {
@@ -186,13 +232,41 @@ class AmoxtliService
     }
 
     /**
+     * .txt que l'ancienne indexation écrivait à côté de X.pdf et X.xlsx, à la
+     * racine du dossier du marché. Comme ses glob(), elle ne traitait que les
+     * extensions en minuscules. Un .txt déposé sous le même nom de base en
+     * fait partie : il ne s'en distingue pas.
+     *
+     * @return array<string, string> .txt → pièce dont il était la conversion
+     */
+    public function findLegacyTxt(string $id): array
+    {
+        $marketPath = $this->getMarketPath($id);
+
+        $legacy = [];
+        foreach (glob($marketPath.'/*.txt') ?: [] as $path) {
+            foreach (['pdf', 'xlsx'] as $extension) {
+                $origin = substr($path, 0, -3).$extension;
+                if (is_file($path) && is_file($origin)) {
+                    $legacy[basename($path)] = basename($origin);
+                    break;
+                }
+            }
+        }
+
+        return $legacy;
+    }
+
+    /**
      * Copie ou convertit dans le corpus les pièces nouvelles ou modifiées, et
      * supprime les entrées dont la pièce a disparu. Un échec de conversion
      * n'arrête pas le marché : la pièce est classée dans "failed".
      *
+     * À appeler sous le verrou du marché, donc seulement depuis indexMarket().
+     *
      * @return CorpusReport
      */
-    public function buildCorpus(string $id): array
+    private function buildCorpus(string $id): array
     {
         $marketPath = $this->getMarketPath($id);
         $corpusPath = $this->getWorkspacePath($id).'/corpus';
@@ -203,7 +277,7 @@ class AmoxtliService
         $report = ['converted' => [], 'copied' => [], 'removed' => [], 'unsupported' => [], 'failed' => [], 'sources' => []];
         $converters = $this->converters();
 
-        foreach ($this->listFiles($marketPath) as $file) {
+        foreach (is_dir($marketPath) ? $this->listFiles($marketPath) : [] as $file) {
             $extension = strtolower(pathinfo($file, PATHINFO_EXTENSION));
             $converter = $converters[$extension] ?? null;
 
@@ -227,7 +301,10 @@ class AmoxtliService
             $target = $corpusPath.'/'.$entry;
 
             // L'entrée porte la date de sa pièce : une pièce remplacée en change.
-            if (is_file($target) && filemtime($target) === filemtime($source)) {
+            // Date lue avant la conversion : une pièce remplacée pendant la
+            // conversion garde une date différente de son ancien texte.
+            $mtime = (int) filemtime($source);
+            if (is_file($target) && filemtime($target) === $mtime) {
                 continue;
             }
 
@@ -243,7 +320,7 @@ class AmoxtliService
                     $fs->dumpFile($target, $text);
                     $report['converted'][] = $file;
                 }
-                touch($target, (int) filemtime($source));
+                touch($target, $mtime);
             } catch (\Throwable $e) {
                 // Sans entrée attendue, une version précédente est retirée avec les orphelins.
                 unset($report['sources'][$entry]);
@@ -297,27 +374,38 @@ class AmoxtliService
             $result['unindexed'][] = $failure;
         }
 
-        $process = new Process([
-            $this->binaryPath,
-            '--json',
-            '-C', $workspacePath,
-            'doc', 'list',
-        ]);
-        $process->setTimeout(30);
+        // amoxtli pagine la liste (50 documents par défaut).
+        $documents = [];
+        for ($page = 1;; ++$page) {
+            $process = new Process([
+                $this->binaryPath,
+                '--json',
+                '-C', $workspacePath,
+                'doc', 'list',
+                '--limit', (string) self::DOC_LIST_PAGE_SIZE,
+                '--page', (string) $page,
+            ]);
+            $process->setTimeout(30);
 
-        try {
-            $process->run();
-        } catch (\Throwable) {
-            return $result;
-        }
+            try {
+                $process->run();
+            } catch (\Throwable) {
+                return $result;
+            }
 
-        if (!$process->isSuccessful()) {
-            return $result;
-        }
+            if (!$process->isSuccessful()) {
+                return $result;
+            }
 
-        $data = json_decode($process->getOutput(), true);
-        if (!is_array($data) || !isset($data['documents']) || !is_array($data['documents'])) {
-            return $result;
+            $data = json_decode($process->getOutput(), true);
+            if (!is_array($data) || !isset($data['documents']) || !is_array($data['documents'])) {
+                return $result;
+            }
+
+            array_push($documents, ...$data['documents']);
+            if (count($data['documents']) < self::DOC_LIST_PAGE_SIZE || count($documents) >= (int) ($data['total'] ?? 0)) {
+                break;
+            }
         }
 
         $sources = $report['sources'] ?? [];
@@ -349,7 +437,7 @@ class AmoxtliService
                 'source' => $source,
                 'etag' => $doc['etag'] ?? null,
             ];
-        }, $data['documents']);
+        }, $documents);
 
         return $result;
     }
@@ -478,7 +566,13 @@ class AmoxtliService
     {
         $process = new Process($command);
         $process->setTimeout(60);
-        $process->run();
+
+        try {
+            $process->run();
+        } catch (ProcessTimedOutException) {
+            // Le message de Symfony reprend toute la ligne de commande, script Python compris.
+            throw new \RuntimeException(sprintf('échec de %s (délai de %d s dépassé)', $command[0], $process->getTimeout()));
+        }
 
         if (!$process->isSuccessful()) {
             $lines = preg_split('/\R/', trim($process->getErrorOutput())) ?: [];

@@ -18,13 +18,7 @@ class IndexMarketHandler
 
     public function __invoke(IndexMarketMessage $message): void
     {
-        if (!$this->amoxtliService->isAvailable()) {
-            return;
-        }
-
-        $id = $message->getMarketId();
-
-        $this->amoxtliService->initWorkspace($id);
-        $this->amoxtliService->indexMarket($id);
+        // indexMarket() initialise le workspace seulement si le marché a un dossier de pièces.
+        $this->amoxtliService->indexMarket($message->getMarketId());
     }
 }

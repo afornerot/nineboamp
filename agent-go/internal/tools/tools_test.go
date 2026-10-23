@@ -56,6 +56,46 @@ func TestAmoxtliSearch(t *testing.T) {
 	}
 }
 
+// writeReport écrit le rapport du corpus d'un workspace, comme l'indexation PHP.
+func writeReport(t *testing.T, workspace string, sources map[string]string) {
+	t.Helper()
+	data, err := json.Marshal(map[string]any{"sources": sources})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "corpus-report.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAmoxtliSearchGivesPieceNames(t *testing.T) {
+	dir := t.TempDir()
+	bin := writeScript(t, dir, `#!/bin/sh
+cat <<'JSON'
+{
+  "results": [
+    {"source": "file:///Cahier%20des%20charges.pdf.txt", "score": 0.5, "sections": [{"id": "s1", "content": "R&D <b>"}]},
+    {"source": "file:///annexes/notes.txt", "score": 0.25}
+  ],
+  "next_cursor": ""
+}
+JSON
+`)
+
+	workspace := filepath.Join(dir, "ws", "1")
+	if err := os.MkdirAll(filepath.Join(workspace, ".amoxtli"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeReport(t, workspace, map[string]string{"Cahier des charges.pdf.txt": "Cahier des charges.pdf", "annexes/notes.txt": "annexes/NOTES.TXT"})
+	tl := New(Config{AmoxtliBin: bin, AmoxtliDir: filepath.Join(dir, "ws")})
+
+	got := execute(t, tl, "amoxtli_search", map[string]any{"query": "x", "market_id": float64(1)})
+	want := `{"next_cursor":"","results":[{"score":0.5,"sections":[{"id":"s1","content":"R&D <b>"}],"source":"Cahier des charges.pdf"},{"score":0.25,"source":"annexes/NOTES.TXT"}]}`
+	if got != want {
+		t.Errorf("amoxtli_search = %s\nattendu       %s", got, want)
+	}
+}
+
 func TestAmoxtliSearchMissingWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	tl := New(Config{AmoxtliBin: "/bin/false", AmoxtliDir: dir})
@@ -224,7 +264,13 @@ func TestListDocuments(t *testing.T) {
 	tl := New(Config{AmoxtliBin: bin, AmoxtliDir: workspaceRoot})
 
 	got := execute(t, tl, "list_documents", map[string]any{"market_id": float64(3)})
-	if got != `{"documents":[{"source":"file:///CCTP.pdf.txt"}],"total":1}` {
+	if got != `{"documents":["CCTP.pdf.txt"],"total":1}` {
+		t.Errorf("list_documents sans rapport du corpus = %q", got)
+	}
+
+	writeReport(t, filepath.Join(workspaceRoot, "3"), map[string]string{"CCTP.pdf.txt": "CCTP.pdf"})
+	got = execute(t, tl, "list_documents", map[string]any{"market_id": float64(3)})
+	if got != `{"documents":["CCTP.pdf"],"total":1}` {
 		t.Errorf("list_documents = %q", got)
 	}
 }
@@ -260,18 +306,18 @@ printf '{"documents": [%s], "total": 5}' "$docs"
 	}
 	tl := New(Config{AmoxtliBin: bin, AmoxtliDir: workspaceRoot})
 
-	var list struct {
-		Documents []struct {
-			Source string `json:"source"`
-		} `json:"documents"`
-		Total int `json:"total"`
-	}
 	got := execute(t, tl, "list_documents", map[string]any{"market_id": float64(3)})
-	if err := json.Unmarshal([]byte(got), &list); err != nil {
-		t.Fatalf("list_documents = %q: %v", got, err)
-	}
-	if list.Total != 5 || len(list.Documents) != 5 || list.Documents[4].Source != "file:///piece-5.txt" {
+	if got != `{"documents":["piece-1.txt","piece-2.txt","piece-3.txt","piece-4.txt","piece-5.txt"],"total":5}` {
 		t.Errorf("list_documents = %q", got)
+	}
+
+	listed := maxListedDocuments
+	maxListedDocuments = 3
+	t.Cleanup(func() { maxListedDocuments = listed })
+
+	got = execute(t, tl, "list_documents", map[string]any{"market_id": float64(3)})
+	if got != `{"documents":["piece-1.txt","piece-2.txt","piece-3.txt"],"total":5,"truncated":true}` {
+		t.Errorf("list_documents bornée = %q", got)
 	}
 }
 

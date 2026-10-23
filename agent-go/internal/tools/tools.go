@@ -109,7 +109,74 @@ func (t *Tools) amoxtliSearch(ctx context.Context, params map[string]any) (llm.T
 		}
 		return errorResult(err.Error()), nil
 	}
-	return llm.NewToolResult(limitSearchOutput(stdout)), nil
+	return llm.NewToolResult(limitSearchOutput(nameSearchSources(stdout, readPieces(workspace)))), nil
+}
+
+// readPieces lit, dans le rapport écrit par l'indexation (PHP), la pièce
+// déposée d'où vient chaque entrée du corpus indexé (CCTP.pdf.txt → CCTP.pdf).
+func readPieces(workspace string) map[string]string {
+	data, err := os.ReadFile(filepath.Join(workspace, "corpus-report.json"))
+	if err != nil {
+		return nil
+	}
+	var report struct {
+		Sources map[string]string `json:"sources"`
+	}
+	if err := json.Unmarshal(data, &report); err != nil {
+		return nil
+	}
+	return report.Sources
+}
+
+// pieceName donne la pièce déposée d'une source amoxtli
+// (file:///Cahier%20des%20charges.pdf.txt → Cahier des charges.pdf), ou à
+// défaut le chemin de son entrée dans le corpus.
+func pieceName(source string, pieces map[string]string) string {
+	u, err := url.Parse(source)
+	if err != nil {
+		return source
+	}
+	entry := strings.TrimPrefix(u.Path, "/")
+	if name, ok := pieces[entry]; ok {
+		return name
+	}
+	return entry
+}
+
+// nameSearchSources remplace la source de chaque résultat par le nom de sa
+// pièce : le LLM cite CCTP.pdf, pas file:///CCTP.pdf.txt.
+func nameSearchSources(out string, pieces map[string]string) string {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		return out
+	}
+	var results []map[string]json.RawMessage
+	if err := json.Unmarshal(payload["results"], &results); err != nil {
+		return out
+	}
+
+	for _, result := range results {
+		var source string
+		if err := json.Unmarshal(result["source"], &source); err != nil {
+			continue
+		}
+		name, err := encodeJSON(pieceName(source, pieces))
+		if err != nil {
+			return out
+		}
+		result["source"] = json.RawMessage(name)
+	}
+
+	encodedResults, err := encodeJSON(results)
+	if err != nil {
+		return out
+	}
+	payload["results"] = json.RawMessage(encodedResults)
+	encoded, err := encodeJSON(payload)
+	if err != nil {
+		return out
+	}
+	return encoded
 }
 
 // Bornes de la sortie d'amoxtli_search transmise au LLM : une recherche
@@ -250,8 +317,14 @@ func truncateRunes(s string, n int) string {
 // docListPageSize : amoxtli pagine doc list (50 documents par défaut).
 var docListPageSize = 200
 
-// listDocuments renvoie tous les documents du marché, au format de
-// `amoxtli doc list --json` ({"documents": […], "total": n}).
+// maxListedDocuments borne la liste transmise au LLM (une vingtaine de
+// caractères par pièce).
+var maxListedDocuments = 500
+
+// listDocuments renvoie le nom des pièces indexées du marché
+// ({"documents": ["CCTP.pdf", …], "total": n}) : les métadonnées d'amoxtli
+// (id, etag, dates…) coûtent environ 350 caractères par document sans servir
+// au LLM, et elles décrivent la conversion en texte, pas la pièce.
 func (t *Tools) listDocuments(ctx context.Context, params map[string]any) (llm.ToolResult, error) {
 	marketID, err := paramInt(params, "market_id")
 	if err != nil {
@@ -261,8 +334,10 @@ func (t *Tools) listDocuments(ctx context.Context, params map[string]any) (llm.T
 	if err != nil {
 		return errorResult(err.Error()), nil
 	}
+	pieces := readPieces(workspace)
 
-	documents := []json.RawMessage{}
+	documents := []string{}
+	total := 0
 	for page := 1; ; page++ {
 		stdout, stderr, err := t.runAmoxtli(ctx, "-C", workspace, "doc", "list", "--json",
 			"--limit", strconv.Itoa(docListPageSize), "--page", strconv.Itoa(page))
@@ -274,19 +349,31 @@ func (t *Tools) listDocuments(ctx context.Context, params map[string]any) (llm.T
 		}
 
 		var list struct {
-			Documents []json.RawMessage `json:"documents"`
-			Total     int               `json:"total"`
+			Documents []struct {
+				Source string `json:"source"`
+			} `json:"documents"`
+			Total int `json:"total"`
 		}
 		if err := json.Unmarshal([]byte(stdout), &list); err != nil {
 			return errorResult("réponse illisible de amoxtli doc list: " + err.Error()), nil
 		}
-		documents = append(documents, list.Documents...)
-		if len(list.Documents) < docListPageSize || len(documents) >= list.Total {
+		for _, doc := range list.Documents {
+			documents = append(documents, pieceName(doc.Source, pieces))
+		}
+		total = max(list.Total, len(documents))
+		if len(list.Documents) < docListPageSize || len(documents) >= list.Total || len(documents) >= maxListedDocuments {
 			break
 		}
 	}
 
-	encoded, err := encodeJSON(map[string]any{"documents": documents, "total": len(documents)})
+	if len(documents) > maxListedDocuments {
+		documents = documents[:maxListedDocuments]
+	}
+	result := map[string]any{"documents": documents, "total": total}
+	if total > len(documents) {
+		result["truncated"] = true
+	}
+	encoded, err := encodeJSON(result)
 	if err != nil {
 		return errorResult(err.Error()), nil
 	}

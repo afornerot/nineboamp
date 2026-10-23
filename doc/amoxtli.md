@@ -77,9 +77,11 @@ Déclenchée :
    60 s.
 5. **Rapport** : `uploads/amoxtli/{id}/corpus-report.json` (pièces converties,
    copiées, supprimées, non prises en charge, en échec, et version de chaque
-   pièce). L'onglet « Documents indexés » de la page marché et les sources du
-   chat l'utilisent pour afficher le nom d'origine des pièces ; l'onglet y
-   prend aussi la liste des pièces non indexées avec leur raison.
+   pièce). L'onglet « Documents indexés » de la page marché, les sources du
+   chat et les outils de l'agent Go l'utilisent pour donner le nom d'origine
+   des pièces (`CCTP.pdf`, pas `CCTP.pdf.txt`) ; l'onglet y prend aussi la
+   liste des pièces non indexées avec leur raison. `list_documents` ne donne
+   au LLM que ces noms, au plus 500.
 
 Un passage sans changement prend environ 1 s.
 

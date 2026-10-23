@@ -20,12 +20,15 @@ SUPERCRONIC_PID=$!
 
 start_messenger() {
     while true; do
-        bin/console messenger:consume async --memory-limit=256M
+        bin/console messenger:consume "$1" --memory-limit=256M
         sleep 5
     done
 }
-start_messenger &
+start_messenger async &
 MESSENGER_PID=$!
+# Indexation amoxtli à part : elle peut durer plusieurs minutes par marché
+start_messenger amoxtli &
+INDEXER_PID=$!
 
 # Start the Go agent (genai) on 8000, the port PHP calls
 /usr/local/bin/nineagent \
@@ -38,7 +41,7 @@ AGENT_PID=$!
 APACHE_PID=$!
 
 graceful_stop() {
-    kill -TERM "$SUPERCRONIC_PID" "$APACHE_PID" "$MESSENGER_PID" "$AGENT_PID" 2>/dev/null || true
+    kill -TERM "$SUPERCRONIC_PID" "$APACHE_PID" "$MESSENGER_PID" "$INDEXER_PID" "$AGENT_PID" 2>/dev/null || true
     wait
     exit 0
 }
@@ -57,6 +60,10 @@ while true; do
         echo "$(date '+%F %T') STOP MESSENGER" >> var/log/startup.log
         break
     fi
+    if ! kill -0 "$INDEXER_PID" 2>/dev/null; then
+        echo "$(date '+%F %T') STOP INDEXER" >> var/log/startup.log
+        break
+    fi
     if ! kill -0 "$AGENT_PID" 2>/dev/null; then
         echo "$(date '+%F %T') STOP AGENT" >> var/log/startup.log
         break
@@ -64,5 +71,5 @@ while true; do
     sleep 2
 done
 
-kill -TERM "$SUPERCRONIC_PID" "$APACHE_PID" "$MESSENGER_PID" "$AGENT_PID" 2>/dev/null || true
+kill -TERM "$SUPERCRONIC_PID" "$APACHE_PID" "$MESSENGER_PID" "$INDEXER_PID" "$AGENT_PID" 2>/dev/null || true
 wait

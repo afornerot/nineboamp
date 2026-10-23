@@ -131,7 +131,7 @@ docker compose exec nineboamp grep AiService var/log/dev.log | tail
 | Log : `réponse IA vide ou inattendue` avec `reasoning_content` | Modèle « à raisonnement » à court de tokens | Augmenter `max_tokens` dans l'en-tête du prompt concerné (`src/DataFixtures/data/scoring/*.md`) |
 | `Deadlock` / `SAVEPOINT does not exist` sur `app:init` | Lancé pendant l'init du démarrage | Attendre « START HTTPD » et relancer |
 | Pièce absente des réponses du chat | Format non pris en charge, PDF scanné ou fichier illisible : l'onglet « Documents indexés » du marché liste les pièces non indexées et la raison | Formats pris en charge : [doc/amoxtli.md](doc/amoxtli.md#formats-pris-en-charge) |
-| Après une mise à jour : `X.txt` indexé en double de `X.pdf` ou `X.xlsx`, sections tronquées ou erreur de contexte dans le chat | Conversions écrites dans le dossier des pièces par l'ancienne indexation | Redémarrer le worker (`messenger:stop-workers`), puis `app:amoxtli:reindex --all --purge-legacy-txt --dry-run`, puis sans `--dry-run` ([migration](doc/amoxtli.md#migration-depuis-lancienne-indexation)) |
+| Après une mise à jour : `X.txt` indexé en double de `X.pdf` ou `X.xlsx`, sections tronquées ou erreur de contexte dans le chat | Conversions écrites dans le dossier des pièces par l'ancienne indexation | Reconstruire et redémarrer le conteneur (`docker compose up -d --build nineboamp`), puis `app:amoxtli:reindex --all --purge-legacy-txt --dry-run`, puis sans `--dry-run` ([migration](doc/amoxtli.md#migration-depuis-lancienne-indexation)) |
 
 ## Fonctionnalités principales
 

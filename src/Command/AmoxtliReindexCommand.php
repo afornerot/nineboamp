@@ -43,6 +43,11 @@ class AmoxtliReindexCommand extends Command
             return Command::INVALID;
         }
 
+        if (null !== $marketId && !ctype_digit((string) $marketId)) {
+            $io->error('L\'ID de marché doit être un nombre.');
+            return Command::INVALID;
+        }
+
         if ($dryRun && !$purge) {
             $io->error('--dry-run ne s\'utilise qu\'avec --purge-legacy-txt.');
             return Command::INVALID;
@@ -55,13 +60,13 @@ class AmoxtliReindexCommand extends Command
 
         // Les marchés qui ont des pièces ou un workspace : l'index d'un marché
         // dont le dossier de pièces a disparu est supprimé.
-        $marketIds = [$marketId];
+        $marketIds = [(string) $marketId];
         if ($all) {
             $uploads = $this->amoxtliService->getProjectDir().'/uploads';
-            $marketIds = array_values(array_unique(array_map('basename', array_merge(
+            $marketIds = array_values(array_unique(array_filter(array_map('basename', array_merge(
                 glob($uploads.'/boamp/*', GLOB_ONLYDIR) ?: [],
                 glob($uploads.'/amoxtli/*', GLOB_ONLYDIR) ?: [],
-            ))));
+            )), 'ctype_digit')));
             sort($marketIds, SORT_NATURAL);
         }
 

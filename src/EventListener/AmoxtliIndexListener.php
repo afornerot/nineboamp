@@ -52,10 +52,11 @@ class AmoxtliIndexListener implements EventSubscriberInterface
             return;
         }
 
-        $id = $parameters->get('id');
+        // L'id d'un upload vient de la query : seul un id numérique désigne un marché.
+        $id = (string) $parameters->get('id');
 
-        if ($id) {
-            $this->messageBus->dispatch(new IndexMarketMessage((string) $id));
+        if (ctype_digit($id)) {
+            $this->messageBus->dispatch(new IndexMarketMessage($id));
         }
     }
 }

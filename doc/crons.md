@@ -51,10 +51,12 @@ depuis l'admin).
 ## Worker Messenger (async)
 
 Les messages async (transports `doctrine://default?auto_setup=0`) sont
-consommés par un worker lancé en parallèle des crons :
+consommés par deux workers lancés en parallèle des crons :
 
-- `messenger:consume async` traite notamment les `IndexMarketMessage`
-  déclenchés par les uploads / suppressions de fichiers ([doc/amoxtli.md](amoxtli.md)).
+- `messenger:consume async` traite les emails et notifications.
+- `messenger:consume amoxtli` traite les `IndexMarketMessage` déclenchés par
+  les uploads / suppressions de fichiers ([doc/amoxtli.md](amoxtli.md)) : une
+  indexation peut durer plusieurs minutes, elle a son propre worker.
 - Démarrage dans `misc/script/reconfigure.sh` (via `supervisord` ou
   `nohup` selon le contexte Docker).
 - Vérifier l'état via `php bin/console messenger:stats`.

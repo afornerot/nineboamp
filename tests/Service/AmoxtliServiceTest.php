@@ -25,6 +25,7 @@ class AmoxtliServiceTest extends TestCase
     private string $projectDir;
     private string $marketPath;
     private string $corpusPath;
+    private LockFactory $lockFactory;
     private AmoxtliService $service;
 
     protected function setUp(): void
@@ -41,7 +42,8 @@ class AmoxtliServiceTest extends TestCase
         $kernel = $this->createStub(KernelInterface::class);
         $kernel->method('getProjectDir')->willReturn($this->projectDir);
 
-        $this->service = new AmoxtliService($kernel, new LockFactory(new InMemoryStore()), new NullLogger());
+        $this->lockFactory = new LockFactory(new InMemoryStore());
+        $this->service = new AmoxtliService($kernel, $this->lockFactory, new NullLogger());
     }
 
     protected function tearDown(): void
@@ -197,6 +199,91 @@ class AmoxtliServiceTest extends TestCase
         $this->assertSame([], $this->search('texteclause'));
     }
 
+    public function testDocxReplacedByAnUnreadableOneLeavesTheIndex(): void
+    {
+        $this->docx('CCTP.docx', 'Clause lisibleclause.');
+        $this->index();
+        $this->assertSame(['CCTP.docx'], $this->search('lisibleclause'));
+
+        // amoxtli garderait l'ancienne version d'un fichier qu'il ne sait plus lire.
+        file_put_contents($this->marketPath.'/CCTP.docx', 'pas un zip');
+        $this->replacedLater('CCTP.docx');
+        $report = $this->index();
+
+        $this->assertStringStartsWith('illisible par amoxtli', array_column($report['failed'], 'reason', 'file')['CCTP.docx']);
+        $this->assertSame([], $this->search('lisibleclause'));
+        $this->assertSame([], $this->indexedFiles());
+    }
+
+    public function testUnchangedFailedPieceIsNotRetried(): void
+    {
+        file_put_contents($this->marketPath.'/casse.docx', 'pas un zip');
+        $first = $this->index();
+        $this->assertSame(['casse.docx'], $first['copied']);
+
+        $report = $this->index();
+
+        // Ni recopiée, ni laissée dans le corpus où amoxtli la retenterait.
+        $this->assertSame([], $report['copied']);
+        $this->assertFileDoesNotExist($this->corpusPath.'/casse.docx');
+        $this->assertSame($first['failed'], $report['failed']);
+
+        // La réindexation retente la pièce.
+        $this->assertSame(['casse.docx'], $this->index(true)['copied']);
+    }
+
+    public function testPieceRewrittenWithinTheSameSecondIsReindexed(): void
+    {
+        // Pièce indexée pendant que l'upload l'écrit encore.
+        file_put_contents($this->marketPath.'/notes.txt', 'Notes tronq');
+        $mtime = (int) filemtime($this->marketPath.'/notes.txt');
+        $this->index();
+
+        file_put_contents($this->marketPath.'/notes.txt', 'Notes tronquées completenote.');
+        touch($this->marketPath.'/notes.txt', $mtime);
+        $report = $this->index();
+
+        $this->assertSame(['notes.txt'], $report['copied']);
+        $this->assertSame(['notes.txt'], $this->search('completenote'));
+    }
+
+    public function testSearchSourcesGiveTheUploadedPieces(): void
+    {
+        $this->pdf('Cahier des charges.pdf', 'Clause sourceclause.');
+        mkdir($this->marketPath.'/annexes');
+        file_put_contents($this->marketPath.'/annexes/NOTES.TXT', 'Notes sourceclause.');
+        $this->index();
+
+        $sources = $this->searchSources('sourceclause');
+        sort($sources);
+        $this->assertSame(['file:///Cahier%20des%20charges.pdf.txt', 'file:///annexes/NOTES.txt'], $sources);
+
+        $this->assertSame(
+            ['Cahier des charges.pdf', 'annexes/NOTES.TXT', 'inconnu.txt'],
+            $this->service->getPieceNames('1', [...$sources, 'file:///inconnu.txt', $sources[0]]),
+        );
+    }
+
+    public function testMarketIdIsAPlainNumber(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        $this->service->indexMarket('../amoxtli/1');
+    }
+
+    public function testWorkspaceIsLeftToARunningIndexing(): void
+    {
+        $lock = $this->lockFactory->createLock('amoxtli-market-1');
+        $lock->acquire();
+
+        $this->service->initWorkspace('1');
+        $this->assertDirectoryDoesNotExist($this->projectDir.'/uploads/amoxtli/1/.amoxtli');
+
+        $lock->release();
+        $this->service->initWorkspace('1');
+        $this->assertDirectoryExists($this->projectDir.'/uploads/amoxtli/1/.amoxtli');
+    }
+
     public function testRebuildStartsFromScratch(): void
     {
         $this->pdf('CCAP.pdf', 'Clause reconstruiteclause.');
@@ -285,6 +372,13 @@ class AmoxtliServiceTest extends TestCase
         file_put_contents($this->marketPath.'/'.$file, $dompdf->output());
     }
 
+    private function docx(string $file, string $text): void
+    {
+        $process = new Process(['pandoc', '-f', 'markdown', '-o', $this->marketPath.'/'.$file]);
+        $process->setInput($text);
+        $process->mustRun();
+    }
+
     /**
      * Un nouvel upload donne une date récente à la pièce ; dans un test, il
      * tombe souvent dans la même seconde que le précédent.
@@ -299,16 +393,24 @@ class AmoxtliServiceTest extends TestCase
      */
     private function search(string $word): array
     {
-        $process = new Process(['/usr/local/bin/amoxtli', '--json', '-C', $this->projectDir.'/uploads/amoxtli/1', 'search', $word]);
-        $process->mustRun();
-
         $entries = [];
-        foreach (json_decode($process->getOutput(), true)['results'] ?? [] as $result) {
-            $entries[] = ltrim(rawurldecode((string) parse_url($result['source'], PHP_URL_PATH)), '/');
+        foreach ($this->searchSources($word) as $source) {
+            $entries[] = ltrim(rawurldecode((string) parse_url($source, PHP_URL_PATH)), '/');
         }
         sort($entries);
 
         return $entries;
+    }
+
+    /**
+     * @return list<string> sources amoxtli des résultats (file:///…)
+     */
+    private function searchSources(string $word): array
+    {
+        $process = new Process(['/usr/local/bin/amoxtli', '--json', '-C', $this->projectDir.'/uploads/amoxtli/1', 'search', $word]);
+        $process->mustRun();
+
+        return array_column(json_decode($process->getOutput(), true)['results'] ?? [], 'source');
     }
 
     /**

@@ -215,7 +215,7 @@ func decodeLimited(t *testing.T, got string) limitedOutput {
 
 func TestListDocuments(t *testing.T) {
 	dir := t.TempDir()
-	bin := writeScript(t, dir, "#!/bin/sh\nprintf '%s' '[\"cctp.pdf\"]'\n")
+	bin := writeScript(t, dir, "#!/bin/sh\nprintf '%s' '{\"documents\": [{\"source\": \"file:///CCTP.pdf.txt\"}], \"total\": 1}'\n")
 
 	workspaceRoot := filepath.Join(dir, "ws")
 	if err := os.MkdirAll(filepath.Join(workspaceRoot, "3", ".amoxtli"), 0o755); err != nil {
@@ -224,7 +224,53 @@ func TestListDocuments(t *testing.T) {
 	tl := New(Config{AmoxtliBin: bin, AmoxtliDir: workspaceRoot})
 
 	got := execute(t, tl, "list_documents", map[string]any{"market_id": float64(3)})
-	if got != `["cctp.pdf"]` {
+	if got != `{"documents":[{"source":"file:///CCTP.pdf.txt"}],"total":1}` {
+		t.Errorf("list_documents = %q", got)
+	}
+}
+
+func TestListDocumentsReadsEveryPage(t *testing.T) {
+	pageSize := docListPageSize
+	docListPageSize = 2
+	t.Cleanup(func() { docListPageSize = pageSize })
+
+	// 5 documents, servis par pages de --limit.
+	dir := t.TempDir()
+	bin := writeScript(t, dir, `#!/bin/sh
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --limit) limit=$2 ;;
+    --page) page=$2 ;;
+  esac
+  shift
+done
+docs=""
+i=$(( (page - 1) * limit + 1 ))
+last=$(( page * limit ))
+while [ $i -le $last ] && [ $i -le 5 ]; do
+  docs="$docs${docs:+,}{\"source\": \"file:///piece-$i.txt\"}"
+  i=$(( i + 1 ))
+done
+printf '{"documents": [%s], "total": 5}' "$docs"
+`)
+
+	workspaceRoot := filepath.Join(dir, "ws")
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, "3", ".amoxtli"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tl := New(Config{AmoxtliBin: bin, AmoxtliDir: workspaceRoot})
+
+	var list struct {
+		Documents []struct {
+			Source string `json:"source"`
+		} `json:"documents"`
+		Total int `json:"total"`
+	}
+	got := execute(t, tl, "list_documents", map[string]any{"market_id": float64(3)})
+	if err := json.Unmarshal([]byte(got), &list); err != nil {
+		t.Fatalf("list_documents = %q: %v", got, err)
+	}
+	if list.Total != 5 || len(list.Documents) != 5 || list.Documents[4].Source != "file:///piece-5.txt" {
 		t.Errorf("list_documents = %q", got)
 	}
 }

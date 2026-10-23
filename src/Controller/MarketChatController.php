@@ -369,18 +369,16 @@ class MarketChatController extends AbstractController
         $sections = [];
         $sources = [];
         foreach ($data['results'] as $result) {
-            if (preg_match('/file:\/\/\/([^\s\n]+)/', $result['source'] ?? '', $m)) {
-                $source = basename($m[1]);
-                if (!in_array($source, $sources, true)) {
-                    $sources[] = $source;
-                }
+            if (is_string($result['source'] ?? null)) {
+                $sources[] = $result['source'];
             }
             foreach ($result['sections'] ?? [] as $section) {
                 $sections[] = $section['content'] ?? '';
             }
         }
 
-        return ['sections' => $sections, 'sources' => $sources];
+        // La source d'un résultat est l'entrée du corpus (CCTP.pdf.txt), pas la pièce déposée.
+        return ['sections' => $sections, 'sources' => $this->amoxtliService->getPieceNames((string) $marketId, $sources)];
     }
 
     /**

@@ -8,6 +8,7 @@ use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Finder\Finder;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\Lock\LockFactory;
+use Symfony\Component\Lock\SharedLockInterface;
 use Symfony\Component\Process\Exception\ProcessFailedException;
 use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\Process;
@@ -27,6 +28,7 @@ use Symfony\Component\Process\Process;
  *     unsupported: list<string>,
  *     failed: list<array{file: string, reason: string}>,
  *     sources: array<string, string>,
+ *     fingerprints: array<string, string>,
  * }
  */
 class AmoxtliService
@@ -42,6 +44,9 @@ class AmoxtliService
     private const PDF_SCAN_MIN_SIZE = 50_000;
 
     private const DOC_LIST_PAGE_SIZE = 200;
+
+    /** Délai d'amoxtli sync par fichier (son défaut) : la synchro entière est bornée par leur somme. */
+    private const SYNC_FILE_TIMEOUT = 300;
 
     /**
      * Toutes les feuilles d'un classeur (.xlsx, .xls) → CSV, chacune précédée
@@ -125,12 +130,12 @@ class AmoxtliService
 
     public function getWorkspacePath(string $id): string
     {
-        return $this->projectDir.'/uploads/amoxtli/'.$id;
+        return $this->projectDir.'/uploads/amoxtli/'.$this->checkMarketId($id);
     }
 
     public function getMarketPath(string $id): string
     {
-        return $this->projectDir.'/uploads/boamp/'.$id;
+        return $this->projectDir.'/uploads/boamp/'.$this->checkMarketId($id);
     }
 
     public function getBinaryPath(): string
@@ -143,40 +148,27 @@ class AmoxtliService
         return $this->projectDir;
     }
 
+    /**
+     * Crée le workspace du marché s'il n'existe pas. Pendant une indexation du
+     * marché, ne fait rien : l'indexation le crée elle-même, et une
+     * reconstruction le supprime puis le recrée.
+     */
     public function initWorkspace(string $id): void
     {
-        if (!$this->isAvailable()) {
+        if (!$this->isAvailable() || is_dir($this->getWorkspacePath($id).'/.amoxtli')) {
             return;
         }
 
-        $workspacePath = $this->getWorkspacePath($id);
-
-        if (is_dir($workspacePath.'/.amoxtli')) {
+        $lock = $this->createMarketLock($id);
+        if (!$lock->acquire()) {
             return;
         }
 
-        $fs = new Filesystem();
         try {
-            $fs->mkdir($workspacePath, 0775);
-        } catch (IOExceptionInterface $e) {
-            throw new \RuntimeException(sprintf('Impossible de créer le répertoire %s : %s', $workspacePath, $e->getMessage()));
+            $this->createWorkspace($id);
+        } finally {
+            $lock->release();
         }
-
-        $process = new Process([$this->binaryPath, 'init'], $workspacePath);
-        $process->setTimeout(30);
-        $process->run();
-
-        if (!$process->isSuccessful()) {
-            // La page du marché initialise le workspace sans le verrou de
-            // indexMarket() : l'autre processus a pu le créer entre-temps.
-            if (is_dir($workspacePath.'/.amoxtli')) {
-                return;
-            }
-
-            throw new ProcessFailedException($process);
-        }
-
-        $this->configureWorkspace($workspacePath);
     }
 
     /**
@@ -195,35 +187,48 @@ class AmoxtliService
         }
 
         // Le worker et app:amoxtli:reindex peuvent traiter le même marché en même temps.
-        $lock = $this->lockFactory->createLock('amoxtli-market-'.$id, 600);
+        $lock = $this->createMarketLock($id);
         $lock->acquire(true);
 
         try {
+            $fs = new Filesystem();
             $workspacePath = $this->getWorkspacePath($id);
             $corpusPath = $workspacePath.'/corpus';
 
             if ($rebuild) {
-                (new Filesystem())->remove([$workspacePath.'/.amoxtli', $corpusPath, $this->getReportPath($id)]);
+                $fs->remove([$workspacePath.'/.amoxtli', $corpusPath, $this->getReportPath($id)]);
             }
 
             if (!is_dir($this->getMarketPath($id)) && !is_dir($workspacePath.'/.amoxtli')) {
                 return null;
             }
 
-            $this->initWorkspace($id);
+            $this->createWorkspace($id);
             $report = $this->buildCorpus($id);
 
-            foreach ($this->syncCorpus($workspacePath, $corpusPath) as $entry => $error) {
-                $report['failed'][] = [
-                    'file' => $report['sources'][$entry] ?? $entry,
-                    'reason' => sprintf('illisible par amoxtli (%s)', $error),
-                ];
+            // amoxtli garde la version précédente d'un fichier qu'il ne sait
+            // pas lire : retirée du corpus, l'entrée quitte l'index au sync suivant.
+            while ([] !== $failed = $this->syncCorpus($workspacePath, $corpusPath, count($report['sources']))) {
+                $removed = false;
+                foreach ($failed as $entry => $error) {
+                    $removed = $removed || is_file($corpusPath.'/'.$entry);
+                    $fs->remove($corpusPath.'/'.$entry);
+                    $report['failed'][] = [
+                        'file' => $report['sources'][$entry] ?? $entry,
+                        'reason' => sprintf('illisible par amoxtli (%s)', $error),
+                    ];
+                    unset($report['sources'][$entry]);
+                }
+
+                if (!$removed) {
+                    break;
+                }
             }
 
             // Un nom de pièce qui n'est pas en UTF-8 ne doit pas empêcher d'écrire le rapport.
             $json = json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR);
             // dumpFile() écrit puis renomme : la page du marché ne lit jamais un rapport à moitié écrit.
-            (new Filesystem())->dumpFile($this->getReportPath($id), $json);
+            $fs->dumpFile($this->getReportPath($id), $json);
 
             return $report;
         } finally {
@@ -260,7 +265,8 @@ class AmoxtliService
     /**
      * Copie ou convertit dans le corpus les pièces nouvelles ou modifiées, et
      * supprime les entrées dont la pièce a disparu. Un échec de conversion
-     * n'arrête pas le marché : la pièce est classée dans "failed".
+     * n'arrête pas le marché : la pièce est classée dans "failed", et n'est
+     * retentée que si elle change (ou à la réindexation).
      *
      * À appeler sous le verrou du marché, donc seulement depuis indexMarket().
      *
@@ -274,7 +280,12 @@ class AmoxtliService
         $fs->mkdir($corpusPath, 0775);
         clearstatcache();
 
-        $report = ['converted' => [], 'copied' => [], 'removed' => [], 'unsupported' => [], 'failed' => [], 'sources' => []];
+        // Le rapport précédent dit quelle version de chaque pièce le corpus contient.
+        $previous = $this->readReport($id);
+        $fingerprints = $previous['fingerprints'] ?? [];
+        $failures = array_column($previous['failed'] ?? [], 'reason', 'file');
+
+        $report = ['converted' => [], 'copied' => [], 'removed' => [], 'unsupported' => [], 'failed' => [], 'sources' => [], 'fingerprints' => []];
         $converters = $this->converters();
 
         foreach (is_dir($marketPath) ? $this->listFiles($marketPath) : [] as $file) {
@@ -300,11 +311,20 @@ class AmoxtliService
             $source = $marketPath.'/'.$file;
             $target = $corpusPath.'/'.$entry;
 
-            // L'entrée porte la date de sa pièce : une pièce remplacée en change.
-            // Date lue avant la conversion : une pièce remplacée pendant la
-            // conversion garde une date différente de son ancien texte.
-            $mtime = (int) filemtime($source);
-            if (is_file($target) && filemtime($target) === $mtime) {
+            // Date et taille, lues avant la conversion : une pièce encore en
+            // cours d'écriture, ou remplacée dans la même seconde, change de
+            // taille et sera refaite au passage suivant.
+            $fingerprint = filemtime($source).':'.filesize($source);
+            $report['fingerprints'][$file] = $fingerprint;
+            $unchanged = ($fingerprints[$file] ?? null) === $fingerprint;
+
+            if ($unchanged && isset($failures[$file])) {
+                unset($report['sources'][$entry]);
+                $report['failed'][] = ['file' => $file, 'reason' => $failures[$file]];
+                continue;
+            }
+
+            if ($unchanged && is_file($target)) {
                 continue;
             }
 
@@ -320,7 +340,6 @@ class AmoxtliService
                     $fs->dumpFile($target, $text);
                     $report['converted'][] = $file;
                 }
-                touch($target, $mtime);
             } catch (\Throwable $e) {
                 // Sans entrée attendue, une version précédente est retirée avec les orphelins.
                 unset($report['sources'][$entry]);
@@ -414,7 +433,7 @@ class AmoxtliService
         $result['documents'] = array_map(function (array $doc) use ($sources, $marketPath): array {
             $meta = $doc['metadata'] ?? [];
             $source = $doc['source'] ?? null;
-            $entry = $source ? ltrim(rawurldecode(parse_url($source, PHP_URL_PATH) ?: ''), '/') : null;
+            $entry = $source ? $this->entryOf($source) : null;
 
             // Nom de la pièce déposée plutôt que celui de sa conversion (CCTP.pdf, pas CCTP.pdf.txt).
             $file = null !== $entry ? ($sources[$entry] ?? null) : null;
@@ -442,13 +461,93 @@ class AmoxtliService
         return $result;
     }
 
+    /**
+     * Pièces déposées d'où viennent des résultats de recherche amoxtli : la
+     * source d'un résultat est son entrée du corpus (file:///CCTP.pdf.txt
+     * pour CCTP.pdf).
+     *
+     * @param list<string> $sources
+     *
+     * @return list<string> sans doublons
+     */
+    public function getPieceNames(string $id, array $sources): array
+    {
+        $pieces = $this->readReport($id)['sources'] ?? [];
+
+        $names = [];
+        foreach ($sources as $source) {
+            $entry = $this->entryOf($source);
+            $names[] = $pieces[$entry] ?? $entry;
+        }
+
+        return array_values(array_unique($names));
+    }
+
+    /**
+     * Entrée du corpus d'une source amoxtli (file:///Cahier%20des%20charges.pdf.txt).
+     */
+    private function entryOf(string $source): string
+    {
+        return ltrim(rawurldecode(parse_url($source, PHP_URL_PATH) ?: ''), '/');
+    }
+
+    /**
+     * L'id d'un upload vient de la requête : "../amoxtli/5" viserait le
+     * workspace d'un autre marché.
+     */
+    private function checkMarketId(string $id): string
+    {
+        if (!ctype_digit($id)) {
+            throw new \InvalidArgumentException(sprintf('Identifiant de marché invalide : "%s"', $id));
+        }
+
+        return $id;
+    }
+
+    private function createMarketLock(string $id): SharedLockInterface
+    {
+        return $this->lockFactory->createLock('amoxtli-market-'.$this->checkMarketId($id), 600);
+    }
+
+    /**
+     * À appeler sous le verrou du marché.
+     */
+    private function createWorkspace(string $id): void
+    {
+        $workspacePath = $this->getWorkspacePath($id);
+
+        if (is_dir($workspacePath.'/.amoxtli')) {
+            return;
+        }
+
+        $fs = new Filesystem();
+        try {
+            $fs->mkdir($workspacePath, 0775);
+        } catch (IOExceptionInterface $e) {
+            throw new \RuntimeException(sprintf('Impossible de créer le répertoire %s : %s', $workspacePath, $e->getMessage()));
+        }
+
+        $process = new Process([$this->binaryPath, 'init'], $workspacePath);
+        $process->setTimeout(30);
+        $process->run();
+
+        if (!$process->isSuccessful()) {
+            // Un .amoxtli à moitié créé passerait ensuite pour un workspace prêt.
+            $fs->remove($workspacePath.'/.amoxtli');
+
+            throw new ProcessFailedException($process);
+        }
+
+        $this->configureWorkspace($workspacePath);
+    }
+
     private function getReportPath(string $id): string
     {
         return $this->getWorkspacePath($id).'/corpus-report.json';
     }
 
     /**
-     * @return array{unsupported?: list<string>, failed?: list<array{file: string, reason: string}>, sources?: array<string, string>}
+     * @return array{unsupported?: list<string>, failed?: list<array{file: string, reason: string}>, sources?: array<string, string>, fingerprints?: array<string, string>}
      */
     private function readReport(string $id): array
     {
@@ -467,9 +566,12 @@ class AmoxtliService
      * l'indexation et donne le résultat de chaque fichier ; il sort en erreur
      * dès qu'un fichier échoue, ce qui ne doit pas faire échouer le marché.
      *
+     * amoxtli abandonne lui-même un fichier au bout de SYNC_FILE_TIMEOUT : le
+     * délai total ne coupe la synchro que si amoxtli ne rend plus la main.
+     *
      * @return array<string, string> entrée du corpus → erreur amoxtli
      */
-    private function syncCorpus(string $workspacePath, string $corpusPath): array
+    private function syncCorpus(string $workspacePath, string $corpusPath, int $entries): array
     {
         $process = new Process([
             $this->binaryPath,
@@ -478,9 +580,10 @@ class AmoxtliService
             'sync',
             $corpusPath,
             '--base-dir', $corpusPath,
+            '--timeout', self::SYNC_FILE_TIMEOUT.'s',
         ]);
 
-        $process->setTimeout(120);
+        $process->setTimeout(60 + self::SYNC_FILE_TIMEOUT * max(1, $entries));
         $process->run();
 
         $data = json_decode($process->getOutput(), true);

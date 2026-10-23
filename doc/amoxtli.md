@@ -23,9 +23,10 @@
 Déclenchée :
 
 - automatiquement à chaque upload ou suppression d'une pièce d'un marché
-  (listener `AmoxtliIndexListener`, domaine `boamp` uniquement → dispatch
-  `IndexMarketMessage` sur le bus asynchrone, traité par le worker
-  `messenger:consume async`) ;
+  (listener `AmoxtliIndexListener`, domaine `boamp` et id numérique
+  uniquement → dispatch `IndexMarketMessage` sur le transport `amoxtli`,
+  traité par son propre worker `messenger:consume amoxtli` : une longue
+  indexation ne retarde pas les emails du transport `async`) ;
 - manuellement par `app:amoxtli:reindex` (voir plus bas).
 
 Étapes de `AmoxtliService::indexMarket()`, sous un verrou
@@ -34,7 +35,8 @@ Déclenchée :
 1. **Vérification** : sans dossier `uploads/boamp/{id}/`, le marché n'a pas
    de pièces. S'il a un index, celui-ci est vidé ; sinon rien n'est créé.
 2. **Workspace** : `amoxtli init` dans `uploads/amoxtli/{id}/` s'il n'existe
-   pas encore.
+   pas encore. La page du marché le crée aussi, sauf pendant une indexation
+   du marché (verrou déjà pris).
 3. **Corpus** (`buildCorpus()`) : parcours récursif des pièces, en ignorant les
    fichiers cachés et les dossiers préfixés `_` (`_thumbs`), comme la liste des
    fichiers du marché. Chaque pièce donne une entrée dans
@@ -45,16 +47,22 @@ Déclenchée :
      L'extension d'origine reste dans le nom : `devis.pdf` et `devis.xlsx` ne
      se marchent pas dessus.
 
-   Une entrée porte la date de modification de sa pièce : elle n'est refaite
-   que si la pièce a changé (remplacement sous le même nom compris). Les
-   entrées dont la pièce a disparu sont supprimées.
+   Le rapport garde la date et la taille de chaque pièce : une entrée n'est
+   refaite que si sa pièce a changé (remplacement sous le même nom compris,
+   ou pièce indexée pendant que l'upload l'écrivait encore). Une pièce en
+   échec n'est retentée que si elle change, ou à la réindexation. Les entrées
+   dont la pièce a disparu sont supprimées.
 4. **Sync** : `amoxtli sync corpus/ --base-dir corpus/`, sans `--no-wait` pour
-   récupérer le résultat de chaque fichier. Un fichier qu'amoxtli ne sait pas
-   lire (ex. `.docx` corrompu) est signalé sans faire échouer le marché.
+   récupérer le résultat de chaque fichier. amoxtli abandonne un fichier au
+   bout de 5 min ; la synchro entière n'est coupée qu'au-delà de 5 min par
+   entrée du corpus. Un fichier qu'amoxtli ne sait pas lire (ex. `.docx`
+   corrompu) est signalé sans faire échouer le marché, et retiré du corpus
+   puis de l'index : amoxtli y garderait sinon sa version précédente.
 5. **Rapport** : `uploads/amoxtli/{id}/corpus-report.json` (pièces converties,
-   copiées, supprimées, non prises en charge, en échec). L'onglet « Documents
-   indexés » de la page marché l'utilise pour afficher le nom d'origine des
-   pièces et la liste des pièces non indexées avec leur raison.
+   copiées, supprimées, non prises en charge, en échec, et version de chaque
+   pièce). L'onglet « Documents indexés » de la page marché et les sources du
+   chat l'utilisent pour afficher le nom d'origine des pièces ; l'onglet y
+   prend aussi la liste des pièces non indexées avec leur raison.
 
 Un passage sans changement prend environ 1 s.
 
@@ -94,9 +102,10 @@ indexation les indexe comme des pièces déposées, en double de leur pièce. À
 faire juste après le déploiement, dans cet ordre :
 
 ```bash
-# 1. Faire tourner le worker Messenger avec le nouveau code : l'ancien écrirait
-#    encore des .txt à chaque upload (la boucle de misc/script/reconfigure.sh le relance)
-docker compose exec nineboamp bin/console messenger:stop-workers
+# 1. Reconstruire et redémarrer le conteneur : l'agent Go est dans l'image, le
+#    worker du transport amoxtli est lancé au démarrage (misc/script/reconfigure.sh),
+#    et l'ancien worker écrirait encore des .txt à chaque upload
+docker compose up -d --build nineboamp
 # 2. Relire la liste : un .txt déposé volontairement avec le même nom de base serait supprimé aussi
 docker compose exec nineboamp bin/console app:amoxtli:reindex --all --purge-legacy-txt --dry-run
 # 3. Supprimer ces .txt et réindexer : les doublons indexés entre-temps disparaissent

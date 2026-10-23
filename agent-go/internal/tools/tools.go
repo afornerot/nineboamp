@@ -247,6 +247,11 @@ func truncateRunes(s string, n int) string {
 	return string(runes[:max(n-markerLen, 0)]) + truncatedMarker
 }
 
+// docListPageSize : amoxtli pagine doc list (50 documents par défaut).
+var docListPageSize = 200
+
+// listDocuments renvoie tous les documents du marché, au format de
+// `amoxtli doc list --json` ({"documents": […], "total": n}).
 func (t *Tools) listDocuments(ctx context.Context, params map[string]any) (llm.ToolResult, error) {
 	marketID, err := paramInt(params, "market_id")
 	if err != nil {
@@ -257,14 +262,35 @@ func (t *Tools) listDocuments(ctx context.Context, params map[string]any) (llm.T
 		return errorResult(err.Error()), nil
 	}
 
-	stdout, stderr, err := t.run(ctx, t.cfg.AmoxtliBin, "-C", workspace, "doc", "list", "--json")
-	if err != nil {
-		if stderr != "" {
-			return errorResult(stderr), nil
+	documents := []json.RawMessage{}
+	for page := 1; ; page++ {
+		stdout, stderr, err := t.run(ctx, t.cfg.AmoxtliBin, "-C", workspace, "doc", "list", "--json",
+			"--limit", strconv.Itoa(docListPageSize), "--page", strconv.Itoa(page))
+		if err != nil {
+			if stderr != "" {
+				return errorResult(stderr), nil
+			}
+			return errorResult(err.Error()), nil
 		}
+
+		var list struct {
+			Documents []json.RawMessage `json:"documents"`
+			Total     int               `json:"total"`
+		}
+		if err := json.Unmarshal([]byte(stdout), &list); err != nil {
+			return errorResult("réponse illisible de amoxtli doc list: " + err.Error()), nil
+		}
+		documents = append(documents, list.Documents...)
+		if len(list.Documents) < docListPageSize || len(documents) >= list.Total {
+			break
+		}
+	}
+
+	encoded, err := encodeJSON(map[string]any{"documents": documents, "total": len(documents)})
+	if err != nil {
 		return errorResult(err.Error()), nil
 	}
-	return llm.NewToolResult(stdout), nil
+	return llm.NewToolResult(encoded), nil
 }
 
 func (t *Tools) searchProducts(ctx context.Context, params map[string]any) (llm.ToolResult, error) {

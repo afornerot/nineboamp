@@ -21,6 +21,13 @@ class AmoxtliIndexListenerTest extends TestCase
         $this->assertSame(['12'], $this->dispatched($request));
     }
 
+    public function testUploadWithAPathAsIdIsIgnored(): void
+    {
+        $request = new Request(['domain' => 'boamp', 'id' => '../amoxtli/5'], [], ['_route' => 'bninefiles_files_uploadfile']);
+
+        $this->assertSame([], $this->dispatched($request));
+    }
+
     public function testUploadOfAvatarIsIgnored(): void
     {
         $request = new Request(['domain' => 'avatar', 'id' => '0'], [], ['_route' => 'bninefiles_files_uploadfile']);

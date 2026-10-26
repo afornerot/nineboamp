@@ -184,6 +184,32 @@ class AmoxtliServiceTest extends TestCase
         $this->assertSame(['DC1.doc.txt'], $this->search('rtfdoc'));
     }
 
+    public function testSpreadsheetUnderTheOtherExtensionIsConverted(): void
+    {
+        copy(self::FIXTURES.'/deux-feuilles.xls', $this->marketPath.'/bpu.xlsx');
+        copy(self::FIXTURES.'/deux-feuilles.xlsx', $this->marketPath.'/dqe.xls');
+
+        $report = $this->index();
+
+        $this->assertSame(['bpu.xlsx', 'dqe.xls'], $report['converted']);
+        $this->assertSame(['bpu.xlsx.txt', 'dqe.xls.txt'], $this->search('secondfeuillet'));
+    }
+
+    public function testOldXlsWithoutOle2ContainerIsConverted(): void
+    {
+        // Un .xls BIFF2 (Excel 2) : des enregistrements à la suite, sans document OLE2 autour.
+        $record = fn (int $id, string $data): string => pack('vv', $id, strlen($data)).$data;
+        file_put_contents($this->marketPath.'/dqe.xls', $record(0x0009, pack('vv', 0x0002, 0x0010))
+            .$record(0x0004, pack('vv', 0, 0)."\0\0\0".chr(8).'biffdeux')
+            .$record(0x000A, ''));
+
+        $report = $this->index();
+
+        $this->assertSame(['dqe.xls'], $report['converted']);
+        $this->assertSame(['dqe.xls.txt'], $this->search('biffdeux'));
+        $this->assertSame("## Feuille : Sheet 1\n\n\"biffdeux\"\n\n", file_get_contents($this->corpusPath.'/dqe.xls.txt'));
+    }
+
     public function testUnreadablePiecesAreReportedWithoutFailingTheMarket(): void
     {
         $this->pdf('scan.pdf', '');
@@ -270,9 +296,24 @@ class AmoxtliServiceTest extends TestCase
 
         $failure = $this->index()['failed'][0];
 
-        $this->assertStringStartsWith('échec de python3', $failure['reason']);
+        $this->assertSame('échec de python3 (BadZipFile: File is not a zip file)', $failure['reason']);
         $this->assertArrayNotHasKey('retry', $failure);
         $this->assertSame([], $this->index()['converted']);
+    }
+
+    public function testSpreadsheetFailureGivesItsCause(): void
+    {
+        // openpyxl enveloppe l'erreur d'un style inconnu dans un message qui
+        // finit par "Please see the exception for more details.".
+        copy(self::FIXTURES.'/deux-feuilles.xlsx', $this->marketPath.'/bpu.xlsx');
+        $zip = new \ZipArchive();
+        $zip->open($this->marketPath.'/bpu.xlsx');
+        $zip->addFromString('xl/styles.xml', str_replace('<left/>', '<left style="inconnu"/>', (string) $zip->getFromName('xl/styles.xml')));
+        $zip->close();
+
+        $failure = $this->index()['failed'][0];
+
+        $this->assertStringStartsWith('échec de python3 (ValueError: Value must be one of', $failure['reason']);
     }
 
     public function testFailureUnrelatedToThePieceIsRetried(): void

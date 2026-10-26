@@ -95,16 +95,24 @@ class AmoxtliService
             return c.value
 
         def sheets():
-            if path.lower().endswith(".xls"):
+            # Le contenu décide avant l'extension : un .xls est un document OLE2, un .xlsx un zip, et l'un porte parfois le nom de l'autre.
+            # Sans l'une ni l'autre signature, l'extension : xlrd lit aussi d'anciens .xls (BIFF2 à 4) qui ne sont pas des documents OLE2.
+            with open(path, "rb") as f:
+                head = f.read(8)
+            zipped = head.startswith(b"PK\x03\x04")
+            ole2 = head == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+            if ole2 or (not zipped and path.lower().endswith(".xls")):
                 import xlrd
-                book = xlrd.open_workbook(path)
+                # xlrd écrit ses avertissements sur stdout, donc dans le texte indexé (ex. "*** No CODEPAGE record").
+                book = xlrd.open_workbook(path, logfile=sys.stderr)
                 for sheet in book.sheets():
                     yield sheet.name, ([xls_cell(c, book.datemode) for c in sheet.row(i)] for i in range(sheet.nrows))
             else:
                 import openpyxl
                 # Sans data_only, openpyxl rend le texte des formules (=D5*E5) au lieu de leur résultat.
                 # read_only lit les lignes au fil de l'eau : dix fois moins de mémoire.
-                for sheet in openpyxl.load_workbook(path, data_only=True, read_only=True).worksheets:
+                # Le fichier ouvert plutôt que son nom : openpyxl refuse un nom en .xls.
+                for sheet in openpyxl.load_workbook(open(path, "rb"), data_only=True, read_only=True).worksheets:
                     # En read_only, openpyxl s'arrête à la plage déclarée par le fichier, parfois fausse.
                     sheet.reset_dimensions()
                     yield sheet.title, sheet.values
@@ -119,18 +127,33 @@ class AmoxtliService
                 return v.date().isoformat() if v.time() == datetime.time() else v.isoformat(sep=" ")
             return v
 
-        for name, rows in sheets():
-            lines = []
-            for row in rows:
-                cells = [text(v) for v in row]
-                while cells and cells[-1] == "":
-                    cells.pop()
-                if cells:
-                    lines.append(cells)
-            if lines:
-                sys.stdout.write("## Feuille : %s\n\n" % name)
-                out.writerows(lines)
-                sys.stdout.write("\n")
+        def describe(e):
+            lines = str(e).strip().splitlines()
+            return type(e).__name__ + (": " + lines[0] if lines else "")
+
+        try:
+            for name, rows in sheets():
+                lines = []
+                for row in rows:
+                    cells = [text(v) for v in row]
+                    while cells and cells[-1] == "":
+                        cells.pop()
+                    if cells:
+                        lines.append(cells)
+                if lines:
+                    sys.stdout.write("## Feuille : %s\n\n" % name)
+                    out.writerows(lines)
+                    sys.stdout.write("\n")
+        except Exception as e:
+            # PHP ne garde que la dernière ligne de la sortie d'erreur, tronquée.
+            # openpyxl enveloppe ses erreurs de lecture dans un message de trois
+            # lignes qui finit par "Please see the exception for more details." :
+            # la cause d'origine d'abord, puis le contexte, sur une seule ligne.
+            chain = []
+            while e is not None:
+                chain.insert(0, describe(e))
+                e = e.__cause__ or (None if e.__suppress_context__ else e.__context__)
+            sys.exit(" ; ".join(chain))
         PY;
 
     private string $projectDir;

@@ -96,7 +96,7 @@ Un passage sans changement prend environ 1 s.
 |--------|------------|
 | `.txt`, `.md`, `.docx`, `.odt`, `.rtf`, `.html`, `.rst`, `.epub`, `.tex` | lus par amoxtli (pandoc), copiés tels quels |
 | `.pdf` | `pdftotext -layout`. Un PDF sans texte (ou de plus de 50 Ko avec moins de 100 caractères) est signalé « PDF image, OCR requis » |
-| `.doc` | `catdoc`, ou `antiword` pour les `.doc` que catdoc refuse (ceux écrits par LibreOffice) |
+| `.doc` | `catdoc`, ou `antiword` pour les `.doc` que catdoc refuse (ceux écrits par LibreOffice). Un `.doc` enregistré au format Word 2007+ (un zip) ou en RTF, reconnu à ses premiers octets, passe par `pandoc` |
 | `.xlsx`, `.xls` | toutes les feuilles en CSV, chacune précédée de `## Feuille : <nom>` (openpyxl, xlrd). Les cellules donnent la valeur affichée : résultat des formules (celui enregistré par le tableur), nombres sans `.0`, dates en `AAAA-MM-JJ` |
 | `.csv` | copié en `.csv.txt` (converti en UTF-8 s'il est en Windows-1252) |
 | autres (`.pptx`, `.ods`, `.zip`, images…) | non indexés, signalés « format non pris en charge » |

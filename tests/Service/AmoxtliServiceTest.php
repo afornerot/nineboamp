@@ -168,6 +168,22 @@ class AmoxtliServiceTest extends TestCase
         $this->assertSame(['AE.doc.txt'], $this->search('quebecdoc'));
     }
 
+    public function testDocSavedInAnotherFormatIsConverted(): void
+    {
+        // Enregistrés au format Word 2007+ ou en RTF sous l'extension .doc : antiword les refuse.
+        $this->docx('AE.docx', 'Acte ooxmldoc.');
+        rename($this->marketPath.'/AE.docx', $this->marketPath.'/AE.doc');
+        $process = new Process(['pandoc', '-f', 'markdown', '-s', '-t', 'rtf', '-o', $this->marketPath.'/DC1.doc']);
+        $process->setInput('Lettre rtfdoc.');
+        $process->mustRun();
+
+        $report = $this->index();
+
+        $this->assertSame(['AE.doc', 'DC1.doc'], $report['converted']);
+        $this->assertSame(['AE.doc.txt'], $this->search('ooxmldoc'));
+        $this->assertSame(['DC1.doc.txt'], $this->search('rtfdoc'));
+    }
+
     public function testUnreadablePiecesAreReportedWithoutFailingTheMarket(): void
     {
         $this->pdf('scan.pdf', '');

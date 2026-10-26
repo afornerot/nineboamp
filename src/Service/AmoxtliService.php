@@ -827,6 +827,12 @@ class AmoxtliService
 
     private function docToText(string $file): string
     {
+        // Un .doc enregistré au format Word 2007+ ou en RTF : antiword le refuse, pandoc le lit.
+        $format = $this->disguisedDocFormat($file);
+        if (null !== $format) {
+            return $this->run(['pandoc', '-f', $format, '-t', 'plain', '--wrap=none', $file]);
+        }
+
         // catdoc rend le texte le plus propre mais refuse certains .doc (ceux
         // écrits par LibreOffice) qu'antiword lit, tableaux en ASCII compris.
         try {
@@ -842,6 +848,22 @@ class AmoxtliService
 
         // Codes des champs de formulaire Word (cases à cocher des AE, DC1, DC2…).
         return str_replace(['FORMCHECKBOX', 'FORMTEXT', 'FORMDROPDOWN'], '', $text);
+    }
+
+    /**
+     * Format réel d'un .doc qui n'en est pas un, d'après ses premiers octets :
+     * un .docx est un zip, un RTF commence par "{\rtf". null pour un vrai .doc
+     * (document OLE2).
+     */
+    private function disguisedDocFormat(string $file): ?string
+    {
+        $head = (string) file_get_contents($file, false, null, 0, 5);
+
+        return match (true) {
+            str_starts_with($head, "PK\x03\x04") => 'docx',
+            str_starts_with($head, '{\rtf') => 'rtf',
+            default => null,
+        };
     }
 
     private function spreadsheetToText(string $file): string

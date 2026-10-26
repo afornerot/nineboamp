@@ -79,9 +79,12 @@ Déclenchée :
    son découpage en sections échoue sur un titre de plus de 250 mots
    (« runtime error: slice bounds out of range »). Le texte brut que `pandoc`
    extrait de la copie, sans titres, est alors indexé à sa place
-   (`<nom complet>.txt`, ex. `DC2.docx.txt`), jusqu'à ce que la pièce change.
-   Si pandoc échoue sans refuser la pièce (délai dépassé, outil absent), elle
-   est retentée au passage suivant, comme après tout autre plantage d'amoxtli.
+   (`<nom complet>.txt`, ex. `DC2.docx.txt`), jusqu'à ce que la pièce ou la
+   version d'amoxtli change ; au `sync` comme à l'`add`, par lots eux aussi.
+   Une pièce déposée sous ce nom passe avant : celle qui fait planter amoxtli
+   est alors signalée illisible. Si pandoc échoue sans refuser la pièce (délai
+   dépassé, outil absent), elle est retentée au passage suivant, comme après
+   tout autre plantage d'amoxtli.
 
    Les recherches et listes de documents (chat PHP, onglet du marché, outils
    de l'agent Go) relancent la commande tant que le workspace est pris, au

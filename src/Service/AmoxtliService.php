@@ -29,6 +29,7 @@ use Symfony\Component\Process\Process;
  *     failed: list<array{file: string, reason: string, retry?: true}>,
  *     sources: array<string, string>,
  *     fingerprints: array<string, string>,
+ *     fallbacks: array<string, string>,
  * }
  */
 class AmoxtliService
@@ -156,8 +157,11 @@ class AmoxtliService
             # openpyxl enveloppe ses erreurs de lecture dans un message de trois
             # lignes qui finit par "Please see the exception for more details." :
             # la cause d'origine d'abord, puis le contexte, sur une seule ligne.
+            # Une chaîne peut boucler (une exception levée depuis sa propre cause) : chacune n'y figure qu'une fois.
             chain = []
-            while e is not None:
+            seen = set()
+            while e is not None and id(e) not in seen:
+                seen.add(id(e))
                 chain.insert(0, describe(e))
                 e = e.__cause__ or (None if e.__suppress_context__ else e.__context__)
             sys.exit(" ; ".join(chain))
@@ -165,6 +169,7 @@ class AmoxtliService
 
     private string $projectDir;
     private string $binaryPath = '/usr/local/bin/amoxtli';
+    private ?string $amoxtliVersion = null;
 
     public function __construct(
         KernelInterface $kernel,
@@ -272,14 +277,17 @@ class AmoxtliService
             $this->addChangedEntries($report, $workspacePath, $corpusPath, $lock);
 
             // Le sync retire de l'index les entrées sorties du corpus, et ne
-            // refait pas celles qui viennent d'être indexées.
+            // refait pas celles qui viennent d'être indexées. Une entrée en
+            // échec, retirée du corpus ou remplacée par son texte de repli,
+            // demande un sync de plus.
             do {
                 $lock->refresh();
-                $removed = false;
+                $changed = false;
                 foreach ($this->syncCorpus($workspacePath, $corpusPath, count($report['sources'])) as $entry => $error) {
-                    $removed = $this->rejectEntry($report, $corpusPath, $entry, $error) || $removed;
+                    $changed = is_file($corpusPath.'/'.$entry) || $changed;
+                    $this->handleFailedEntry($report, $corpusPath, $entry, $error);
                 }
-            } while ($removed);
+            } while ($changed);
 
             // Le message d'erreur d'un convertisseur peut ne pas être en UTF-8 : il ne doit pas empêcher d'écrire le rapport.
             $json = json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR);
@@ -343,9 +351,10 @@ class AmoxtliService
         // Un échec qui ne tient pas à la pièce (délai, outil absent…) est retenté.
         $failures = array_column(array_filter($previous['failed'] ?? [], fn (array $failure): bool => !($failure['retry'] ?? false)), 'reason', 'file');
 
-        $report = ['converted' => [], 'copied' => [], 'removed' => [], 'unsupported' => [], 'failed' => [], 'sources' => [], 'fingerprints' => []];
+        $report = ['converted' => [], 'copied' => [], 'removed' => [], 'unsupported' => [], 'failed' => [], 'sources' => [], 'fingerprints' => [], 'fallbacks' => []];
         $converters = $this->converters();
 
+        $pieces = [];
         foreach (is_dir($marketPath) ? $this->listFiles($marketPath) : [] as $path) {
             // Le rapport est en JSON : un nom qui n'est pas en UTF-8 (archive
             // extraite sous Windows…) y serait altéré, et ne correspondrait
@@ -364,6 +373,13 @@ class AmoxtliService
                 continue;
             }
 
+            $pieces[] = [$path, $file, $converter, $entry];
+        }
+        // Le texte de repli d'une pièce (DC2.docx.txt) ne prend pas le nom
+        // d'une autre, qui vient après elle dans l'ordre alphabétique.
+        $claimed = array_flip(array_column($pieces, 3));
+
+        foreach ($pieces as [$path, $file, $converter, $entry]) {
             if (isset($report['sources'][$entry])) {
                 $report['failed'][] = ['file' => $file, 'reason' => sprintf('même nom dans l\'index que %s', $report['sources'][$entry])];
                 continue;
@@ -399,12 +415,14 @@ class AmoxtliService
             }
 
             // amoxtli a planté sur cette version : son texte extrait par pandoc
-            // la remplace tant qu'elle ne change pas (voir fallBackOnPandoc()).
+            // la remplace tant qu'elle ne change pas, ni amoxtli (voir fallBackOnPandoc()).
             $fallback = $file.'.txt';
             if ($unchanged && null === $converter && ($previous['sources'][$fallback] ?? null) === $file
-                && !isset($report['sources'][$fallback]) && is_file($corpusPath.'/'.$fallback)) {
+                && !isset($claimed[$fallback]) && is_file($corpusPath.'/'.$fallback)
+                && ($previous['fallbacks'][$file] ?? null) === $this->getAmoxtliVersion()) {
                 unset($report['sources'][$entry]);
                 $report['sources'][$fallback] = $file;
+                $report['fallbacks'][$file] = $previous['fallbacks'][$file];
                 continue;
             }
 
@@ -669,7 +687,7 @@ class AmoxtliService
     }
 
     /**
-     * @return array{unsupported?: list<string>, failed?: list<array{file: string, reason: string, retry?: true}>, sources?: array<string, string>, fingerprints?: array<string, string>}
+     * @return array{unsupported?: list<string>, failed?: list<array{file: string, reason: string, retry?: true}>, sources?: array<string, string>, fingerprints?: array<string, string>, fallbacks?: array<string, string>}
      */
     private function readReport(string $id): array
     {
@@ -734,15 +752,42 @@ class AmoxtliService
     private function addChangedEntries(array &$report, string $workspacePath, string $corpusPath, SharedLockInterface $lock): void
     {
         $changed = array_flip([...$report['converted'], ...$report['copied']]);
+        $entries = array_keys(array_filter($report['sources'], fn (string $file): bool => isset($changed[$file])));
 
+        // Les textes de repli des entrées sur lesquelles amoxtli a planté sont indexés ensuite, par lots eux aussi.
+        while ([] !== $entries) {
+            $fallbacks = [];
+            foreach ($this->batches($corpusPath, $entries) as $batch) {
+                // Le verrou du marché expire : chaque lot le prolonge.
+                $lock->refresh();
+                foreach ($this->addEntries($workspacePath, $corpusPath, $batch) as $entry => $error) {
+                    $fallback = $this->handleFailedEntry($report, $corpusPath, $entry, $error);
+                    if (null !== $fallback) {
+                        $fallbacks[] = $fallback;
+                    }
+                }
+
+                // Sans pause, le lot suivant reprendrait le workspace avant les
+                // recherches qui attendent, relancées toutes les 200 ms.
+                usleep(self::ADD_BATCH_PAUSE);
+            }
+            $entries = $fallbacks;
+        }
+    }
+
+    /**
+     * Lots d'au plus ADD_BATCH_SIZE octets ou ADD_BATCH_FILES entrées.
+     *
+     * @param list<string> $entries
+     *
+     * @return list<list<string>>
+     */
+    private function batches(string $corpusPath, array $entries): array
+    {
         $batches = [];
         $batch = [];
         $size = 0;
-        foreach ($report['sources'] as $entry => $file) {
-            if (!isset($changed[$file])) {
-                continue;
-            }
-
+        foreach ($entries as $entry) {
             $batch[] = $entry;
             $size += (int) filesize($corpusPath.'/'.$entry);
             if ($size >= self::ADD_BATCH_SIZE || count($batch) >= self::ADD_BATCH_FILES) {
@@ -755,47 +800,45 @@ class AmoxtliService
             $batches[] = $batch;
         }
 
-        $fallbacks = [];
-        foreach ($batches as $batch) {
-            // Le verrou du marché expire : chaque lot le prolonge.
-            $lock->refresh();
-            foreach ($this->addEntries($workspacePath, $corpusPath, $batch) as $entry => $error) {
-                try {
-                    $fallback = $this->fallBackOnPandoc($report, $corpusPath, $entry, $error);
-                } catch (\RuntimeException $e) {
-                    // Sans texte de pandoc, rien ne dit que la pièce est illisible : elle est retentée.
-                    $this->rejectEntry($report, $corpusPath, $entry, $error.' ; '.$e->getMessage(), true);
-                    continue;
-                }
-                if (null === $fallback) {
-                    $this->rejectEntry($report, $corpusPath, $entry, $error);
-                } else {
-                    $fallbacks[] = $fallback;
-                }
-            }
+        return $batches;
+    }
 
-            // Sans pause, le lot suivant reprendrait le workspace avant les
-            // recherches qui attendent, relancées toutes les 200 ms.
-            usleep(self::ADD_BATCH_PAUSE);
+    /**
+     * Une entrée qu'amoxtli n'a pas su indexer : remplacée par son texte brut
+     * s'il a planté dessus (fallBackOnPandoc()), sinon retirée du corpus.
+     *
+     * @param CorpusReport $report
+     *
+     * @return string|null l'entrée qui la remplace, à indexer
+     */
+    private function handleFailedEntry(array &$report, string $corpusPath, string $entry, string $error): ?string
+    {
+        try {
+            $fallback = $this->fallBackOnPandoc($report, $corpusPath, $entry, $error);
+        } catch (\RuntimeException $e) {
+            // Sans texte de repli, rien ne dit que la pièce est illisible : elle est retentée.
+            $this->rejectEntry($report, $corpusPath, $entry, $error.' ; '.$e->getMessage(), true);
+
+            return null;
         }
 
-        if ([] !== $fallbacks) {
-            $lock->refresh();
-            foreach ($this->addEntries($workspacePath, $corpusPath, $fallbacks) as $entry => $error) {
-                $this->rejectEntry($report, $corpusPath, $entry, $error);
-            }
+        if (null === $fallback) {
+            $this->rejectEntry($report, $corpusPath, $entry, $error);
         }
+
+        return $fallback;
     }
 
     /**
      * amoxtli plante sur certains documents qu'il lit d'ordinaire : son
      * découpage en sections échoue sur un titre de plus de 250 mots ("runtime
      * error: slice bounds out of range", amoxtli 0.17.3). Le texte brut que
-     * pandoc extrait de la copie, sans titres, la remplace alors.
+     * pandoc extrait de la copie, sans titres, la remplace alors. Le rapport
+     * garde la version d'amoxtli : une autre le relira peut-être.
      *
      * @param CorpusReport $report
      *
-     * @throws \RuntimeException si pandoc échoue sans refuser la pièce (délai dépassé, pandoc absent)
+     * @throws \RuntimeException si pandoc échoue sans refuser la pièce (délai dépassé, pandoc absent), ou si le texte n'a pas pu être écrit
      *
      * @return string|null l'entrée qui remplace $entry, à indexer
      */
@@ -818,15 +861,32 @@ class AmoxtliService
             return null;
         }
 
+        // Le texte d'abord : s'il n'est pas écrit, la copie reste à retirer par rejectEntry().
         $fs = new Filesystem();
-        $fs->remove($corpusPath.'/'.$entry);
         $fs->dumpFile($corpusPath.'/'.$fallback, $text);
+        $fs->remove($corpusPath.'/'.$entry);
         unset($report['sources'][$entry]);
         $report['sources'][$fallback] = $file;
+        $report['fallbacks'][$file] = $this->getAmoxtliVersion();
         $report['copied'] = array_values(array_diff($report['copied'], [$file]));
         $report['converted'][] = $file;
 
         return $fallback;
+    }
+
+    /**
+     * Version d'amoxtli ("amoxtli version 0.17.3 (…)"), lue une fois.
+     */
+    private function getAmoxtliVersion(): string
+    {
+        if (null === $this->amoxtliVersion) {
+            $process = new Process([$this->binaryPath, '--version']);
+            $process->setTimeout(10);
+            $process->run();
+            $this->amoxtliVersion = trim($process->getOutput());
+        }
+
+        return $this->amoxtliVersion;
     }
 
     /**
@@ -872,12 +932,9 @@ class AmoxtliService
      *
      * @param CorpusReport $report
      * @param bool         $retry  retentée au passage suivant, même si $error met la pièce en cause
-     *
-     * @return bool si l'entrée était encore dans le corpus
      */
-    private function rejectEntry(array &$report, string $corpusPath, string $entry, string $error, bool $retry = false): bool
+    private function rejectEntry(array &$report, string $corpusPath, string $entry, string $error, bool $retry = false): void
     {
-        $present = is_file($corpusPath.'/'.$entry);
         (new Filesystem())->remove($corpusPath.'/'.$entry);
 
         // "exit status 63" : le convertisseur d'amoxtli (pandoc) a refusé le
@@ -891,12 +948,10 @@ class AmoxtliService
             'file' => $file,
             'reason' => sprintf('illisible par amoxtli (%s)', $error),
         ] + ($rejected ? [] : ['retry' => true]);
-        unset($report['sources'][$entry]);
+        unset($report['sources'][$entry], $report['fallbacks'][$file]);
         // Pas indexée : le rapport ne la compte pas aussi comme convertie ou copiée.
         $report['converted'] = array_values(array_diff($report['converted'], [$file]));
         $report['copied'] = array_values(array_diff($report['copied'], [$file]));
-
-        return $present;
     }
 
     /**

@@ -333,6 +333,60 @@ class AmoxtliServiceTest extends TestCase
         $this->assertSame(['DC2.docx.txt'], $this->search('repliclause'));
     }
 
+    public function testCrashDuringSyncFallsBackOnText(): void
+    {
+        $this->docx('DC2.docx', 'Corps lisibleclause.');
+        $this->index();
+
+        // La pièce n'a pas changé, mais sa copie fait maintenant planter
+        // amoxtli : seul le sync la relit (ex. amoxtli mis à jour, workspace recréé).
+        $this->docxThatCrashesAmoxtli('copie.docx', 'Corps repliclause.');
+        rename($this->marketPath.'/copie.docx', $this->corpusPath.'/DC2.docx');
+        $report = $this->index();
+
+        $this->assertSame([], $report['failed']);
+        $this->assertSame(['DC2.docx'], $report['converted']);
+        $this->assertSame(['DC2.docx.txt'], $this->search('repliclause'));
+        $this->assertSame(['DC2.docx'], $this->indexedFiles());
+    }
+
+    public function testFallbackIsRedoneWhenAmoxtliChanges(): void
+    {
+        $this->docxThatCrashesAmoxtli('DC2.docx', 'Corps repliclause.');
+        $this->index();
+
+        // Le texte de repli vient d'une autre version d'amoxtli, qui a peut-être été corrigée depuis.
+        $reportPath = $this->projectDir.'/uploads/amoxtli/1/corpus-report.json';
+        $previous = json_decode((string) file_get_contents($reportPath), true);
+        $this->assertStringStartsWith('amoxtli version ', $previous['fallbacks']['DC2.docx']);
+        $previous['fallbacks']['DC2.docx'] = 'amoxtli version 0.17.2';
+        file_put_contents($reportPath, json_encode($previous));
+
+        $report = $this->index();
+
+        $this->assertSame(['DC2.docx'], $report['converted']);
+        $this->assertNotSame('amoxtli version 0.17.2', $report['fallbacks']['DC2.docx']);
+        $this->assertSame(['DC2.docx.txt'], $this->search('repliclause'));
+    }
+
+    public function testPieceNamedLikeAFallbackTakesItsPlace(): void
+    {
+        $this->docxThatCrashesAmoxtli('DC2.docx', 'Corps repliclause.');
+        $this->index();
+
+        file_put_contents($this->marketPath.'/DC2.docx.txt', 'Notes deposeclause.');
+        $report = $this->index();
+
+        $this->assertSame(['DC2.docx.txt'], $report['copied']);
+        $this->assertSame(['DC2.docx.txt'], $this->search('deposeclause'));
+        $this->assertSame([], $this->search('repliclause'));
+        $this->assertSame(['DC2.docx.txt'], $this->indexedFiles());
+        $this->assertCount(1, $report['failed']);
+        $this->assertSame('DC2.docx', $report['failed'][0]['file']);
+        $this->assertStringStartsWith('illisible par amoxtli (runtime error: slice bounds out of range', $report['failed'][0]['reason']);
+        $this->assertArrayNotHasKey('retry', $report['failed'][0]);
+    }
+
     public function testUnreadableSpreadsheetIsNotRetried(): void
     {
         file_put_contents($this->marketPath.'/casse.xlsx', 'pas un zip');

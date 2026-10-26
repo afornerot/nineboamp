@@ -76,8 +76,9 @@ Déclenchée :
    version précédente.
 
    amoxtli 0.17.3 plante aussi sur certains documents qu'il lit d'ordinaire :
-   son découpage en sections échoue sur un titre de plus de 250 mots
-   (« runtime error: slice bounds out of range »). Le texte brut que `pandoc`
+   son découpage en sections échoue sur un titre de plus de 250 mots qui mêle
+   texte et mise en forme, du gras par exemple (« runtime error: slice bounds
+   out of range » ; un titre de texte seul passe). Le texte brut que `pandoc`
    extrait de la copie, sans titres, est alors indexé à sa place
    (`<nom complet>.txt`, ex. `DC2.docx.txt`), jusqu'à ce que la pièce ou la
    version d'amoxtli change ; au `sync` comme à l'`add`, par lots eux aussi.
@@ -107,7 +108,7 @@ Un passage sans changement prend environ 1 s.
 |--------|------------|
 | `.txt`, `.md`, `.docx`, `.odt`, `.rtf`, `.html`, `.rst`, `.epub`, `.tex` | lus par amoxtli (pandoc), copiés tels quels |
 | `.pdf` | `pdftotext -layout`. Un PDF sans texte (ou de plus de 50 Ko avec moins de 100 caractères) est signalé « PDF image, OCR requis » |
-| `.doc` | `catdoc`, ou `antiword` pour les `.doc` que catdoc refuse (ceux écrits par LibreOffice). Un `.doc` enregistré au format Word 2007+ (un zip) ou en RTF, reconnu à ses premiers octets, passe par `pandoc` |
+| `.doc` | `catdoc`, ou `antiword` pour les `.doc` que catdoc refuse (ceux écrits par LibreOffice). Un `.doc` enregistré dans un autre format, reconnu à son début, est lu par amoxtli sous ce format, titres compris : Word 2007+ (un zip) copié en `.doc.docx`, RTF en `.doc.rtf`, page web en `.doc.html`, page web à fichier unique (MHTML, export « Word » de bien des applications) réduite à sa page HTML en `.doc.html` |
 | `.xlsx`, `.xls` | toutes les feuilles en CSV, chacune précédée de `## Feuille : <nom>` (openpyxl pour un zip, xlrd pour un document OLE2, quelle que soit l'extension ; sinon d'après l'extension, xlrd lisant aussi les anciens `.xls` BIFF2 à 4). Les cellules donnent la valeur affichée : résultat des formules (celui enregistré par le tableur), nombres sans `.0`, dates en `AAAA-MM-JJ` |
 | `.csv` | copié en `.csv.txt` (converti en UTF-8 s'il est en Windows-1252) |
 | autres (`.pptx`, `.ods`, `.zip`, images…) | non indexés, signalés « format non pris en charge » |

@@ -168,20 +168,46 @@ class AmoxtliServiceTest extends TestCase
         $this->assertSame(['AE.doc.txt'], $this->search('quebecdoc'));
     }
 
-    public function testDocSavedInAnotherFormatIsConverted(): void
+    public function testDocSavedInAnotherFormatIsReadInThatFormat(): void
     {
-        // Enregistrés au format Word 2007+ ou en RTF sous l'extension .doc : antiword les refuse.
-        $this->docx('AE.docx', 'Acte ooxmldoc.');
+        // Enregistrés au format Word 2007+, en RTF ou en page web sous l'extension .doc : antiword les refuse.
+        $this->docx('AE.docx', "# Acte\n\nCorps ooxmldoc.");
         rename($this->marketPath.'/AE.docx', $this->marketPath.'/AE.doc');
         $process = new Process(['pandoc', '-f', 'markdown', '-s', '-t', 'rtf', '-o', $this->marketPath.'/DC1.doc']);
-        $process->setInput('Lettre rtfdoc.');
+        $process->setInput("# Lettre\n\nCorps rtfdoc.");
         $process->mustRun();
+        file_put_contents($this->marketPath.'/DC2.doc', '<html xmlns:w="urn:schemas-microsoft-com:office:word"><body><h1>Déclaration</h1><p>Corps htmldoc.</p></body></html>');
+        // Page web à fichier unique : la page en quoted-printable et en Windows-1252, suivie de ses images.
+        file_put_contents($this->marketPath.'/DC4.doc', implode("\r\n", [
+            'MIME-Version: 1.0',
+            'Content-Type: multipart/related; boundary="----=_NextPart_01"',
+            '',
+            '------=_NextPart_01',
+            'Content-Transfer-Encoding: quoted-printable',
+            'Content-Type: text/html; charset="windows-1252"',
+            '',
+            '<html><body><h1>Engagement</h1><p class=3DMsoNormal>Corps mhtml=',
+            'doc r=E9ponse.</p></body></html>',
+            '',
+            '------=_NextPart_01',
+            'Content-Transfer-Encoding: base64',
+            'Content-Type: image/png',
+            '',
+            'iVBORw0KGgo=',
+            '',
+            '------=_NextPart_01--',
+            '',
+        ]));
 
         $report = $this->index();
 
-        $this->assertSame(['AE.doc', 'DC1.doc'], $report['converted']);
-        $this->assertSame(['AE.doc.txt'], $this->search('ooxmldoc'));
-        $this->assertSame(['DC1.doc.txt'], $this->search('rtfdoc'));
+        $this->assertSame(['AE.doc', 'DC1.doc', 'DC2.doc'], $report['copied']);
+        $this->assertSame(['DC4.doc'], $report['converted']);
+        $this->assertSame(['AE.doc', 'DC1.doc', 'DC2.doc', 'DC4.doc'], $this->indexedFiles());
+        $this->assertSame(["# Acte\n\nCorps ooxmldoc."], $this->searchSections('ooxmldoc'));
+        $this->assertSame(["# Lettre\n\nCorps rtfdoc."], $this->searchSections('rtfdoc'));
+        $this->assertSame(["# Déclaration\n\nCorps htmldoc."], $this->searchSections('htmldoc'));
+        $this->assertSame(["# Engagement\n\nCorps mhtmldoc réponse."], $this->searchSections('mhtmldoc'));
     }
 
     public function testSpreadsheetUnderTheOtherExtensionIsConverted(): void
@@ -331,6 +357,23 @@ class AmoxtliServiceTest extends TestCase
         // Retentée au passage suivant, avec pandoc.
         $this->assertSame(['DC2.docx'], $this->index()['converted']);
         $this->assertSame(['DC2.docx.txt'], $this->search('repliclause'));
+    }
+
+    public function testFallbackIsDroppedWhenThePieceChanges(): void
+    {
+        $this->docxThatCrashesAmoxtli('DC2.docx', 'Corps repliclause.');
+        $this->index();
+
+        $this->docx('DC2.docx', 'Corps lisibleclause.');
+        $this->replacedLater('DC2.docx');
+        $report = $this->index();
+
+        $this->assertSame(['DC2.docx'], $report['copied']);
+        $this->assertSame([], $report['converted']);
+        $this->assertSame(['DC2.docx.txt'], $report['removed']);
+        $this->assertSame([], $report['fallbacks']);
+        $this->assertSame(['DC2.docx'], $this->search('lisibleclause'));
+        $this->assertSame([], $this->search('repliclause'));
     }
 
     public function testCrashDuringSyncFallsBackOnText(): void
@@ -644,7 +687,8 @@ class AmoxtliServiceTest extends TestCase
 
     private function docxThatCrashesAmoxtli(string $file, string $body): void
     {
-        // amoxtli 0.17.3 plante sur un titre de plus de 250 mots (runtime error: slice bounds out of range).
+        // amoxtli 0.17.3 plante sur un titre de plus de 250 mots qui mêle texte
+        // et mise en forme (runtime error: slice bounds out of range).
         $words = implode(' ', array_map(fn (int $i): string => 'mot'.$i, range(1, 300)));
         $this->docx($file, "# Titre $words *gras* $words\n\n$body");
     }
@@ -701,10 +745,26 @@ class AmoxtliServiceTest extends TestCase
      */
     private function searchSources(string $word): array
     {
+        return array_column($this->searchResults($word), 'source');
+    }
+
+    /**
+     * @return list<string> texte des sections trouvées, titres compris
+     */
+    private function searchSections(string $word): array
+    {
+        return array_merge([], ...array_map(fn (array $result): array => array_column($result['sections'] ?? [], 'content'), $this->searchResults($word)));
+    }
+
+    /**
+     * @return list<array<string, mixed>> résultats d'amoxtli search
+     */
+    private function searchResults(string $word): array
+    {
         $process = new Process(['/usr/local/bin/amoxtli', '--json', '-C', $this->projectDir.'/uploads/amoxtli/1', 'search', $word]);
         $process->mustRun();
 
-        return array_column(json_decode($process->getOutput(), true)['results'] ?? [], 'source');
+        return json_decode($process->getOutput(), true)['results'] ?? [];
     }
 
     /**

@@ -167,6 +167,24 @@ class AmoxtliService
             sys.exit(" ; ".join(chain))
         PY;
 
+    /**
+     * Page HTML d'une page web à fichier unique (MHTML), en UTF-8 : le module
+     * email décode le quoted-printable et le jeu de caractères de la partie.
+     * Les autres parties (images, styles) sont laissées.
+     */
+    private const MHTML_TO_HTML = <<<'PY'
+        import email, email.policy, sys
+
+        with open(sys.argv[1], "rb") as f:
+            message = email.message_from_binary_file(f, policy=email.policy.default)
+        for part in message.walk():
+            if part.get_content_type() == "text/html":
+                sys.stdout.buffer.write(part.get_content().encode())
+                break
+        else:
+            sys.exit("aucune page HTML")
+        PY;
+
     private string $projectDir;
     private string $binaryPath = '/usr/local/bin/amoxtli';
     private ?string $amoxtliVersion = null;
@@ -360,20 +378,13 @@ class AmoxtliService
             // extraite sous Windows…) y serait altéré, et ne correspondrait
             // plus au passage suivant. Comme les CSV, il est lu en Windows-1252.
             $file = mb_check_encoding($path, 'UTF-8') ? $path : mb_convert_encoding($path, 'UTF-8', 'Windows-1252');
-            $extension = strtolower(pathinfo($file, PATHINFO_EXTENSION));
-            $converter = $converters[$extension] ?? null;
-
-            if (null !== $converter) {
-                // L'extension d'origine reste dans le nom : devis.pdf et devis.xlsx ne se marchent pas dessus.
-                $entry = $file.'.txt';
-            } elseif (in_array($extension, self::NATIVE_EXTENSIONS, true)) {
-                $entry = substr($file, 0, -strlen($extension)).$extension;
-            } else {
+            $piece = $this->corpusEntry($marketPath.'/'.$path, $file, $converters);
+            if (null === $piece) {
                 $report['unsupported'][] = $file;
                 continue;
             }
 
-            $pieces[] = [$path, $file, $converter, $entry];
+            $pieces[] = [$path, $file, ...$piece];
         }
         // Le texte de repli d'une pièce (DC2.docx.txt) ne prend pas le nom
         // d'une autre, qui vient après elle dans l'ordre alphabétique.
@@ -416,8 +427,8 @@ class AmoxtliService
 
             // amoxtli a planté sur cette version : son texte extrait par pandoc
             // la remplace tant qu'elle ne change pas, ni amoxtli (voir fallBackOnPandoc()).
-            $fallback = $file.'.txt';
-            if ($unchanged && null === $converter && ($previous['sources'][$fallback] ?? null) === $file
+            $fallback = $this->textEntry($file);
+            if ($unchanged && ($previous['sources'][$fallback] ?? null) === $file
                 && !isset($claimed[$fallback]) && is_file($corpusPath.'/'.$fallback)
                 && ($previous['fallbacks'][$file] ?? null) === $this->getAmoxtliVersion()) {
                 unset($report['sources'][$entry]);
@@ -459,6 +470,48 @@ class AmoxtliService
         }
 
         return $report;
+    }
+
+    /**
+     * Entrée du corpus d'une pièce, et le convertisseur qui l'écrit (null :
+     * copiée telle quelle).
+     *
+     * @param array<string, \Closure(string): string> $converters
+     *
+     * @return array{(\Closure(string): string)|null, string}|null null si son format n'est pas pris en charge
+     */
+    private function corpusEntry(string $source, string $file, array $converters): ?array
+    {
+        $extension = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+
+        // Un .doc enregistré dans un format qu'amoxtli lit (antiword le
+        // refuse) est indexé sous ce format, titres compris : AE.doc.docx.
+        $format = 'doc' === $extension ? $this->disguisedDocFormat($source) : null;
+        if ('mhtml' === $format) {
+            return [$this->mhtmlToHtml(...), $file.'.html'];
+        }
+        if (null !== $format) {
+            return [null, $file.'.'.$format];
+        }
+
+        if (isset($converters[$extension])) {
+            return [$converters[$extension], $this->textEntry($file)];
+        }
+        if (in_array($extension, self::NATIVE_EXTENSIONS, true)) {
+            return [null, substr($file, 0, -strlen($extension)).$extension];
+        }
+
+        return null;
+    }
+
+    /**
+     * Entrée du texte extrait d'une pièce, par son convertisseur ou par
+     * fallBackOnPandoc(). L'extension d'origine reste dans le nom : devis.pdf
+     * et devis.xlsx ne se marchent pas dessus.
+     */
+    private function textEntry(string $file): string
+    {
+        return $file.'.txt';
     }
 
     /**
@@ -831,10 +884,11 @@ class AmoxtliService
 
     /**
      * amoxtli plante sur certains documents qu'il lit d'ordinaire : son
-     * découpage en sections échoue sur un titre de plus de 250 mots ("runtime
-     * error: slice bounds out of range", amoxtli 0.17.3). Le texte brut que
-     * pandoc extrait de la copie, sans titres, la remplace alors. Le rapport
-     * garde la version d'amoxtli : une autre le relira peut-être.
+     * découpage en sections échoue sur un titre de plus de 250 mots qui mêle
+     * texte et mise en forme, gras par exemple ("runtime error: slice bounds
+     * out of range", amoxtli 0.17.3). Le texte brut que pandoc extrait de la
+     * copie, sans titres, la remplace alors. Le rapport garde la version
+     * d'amoxtli : une autre le relira peut-être.
      *
      * @param CorpusReport $report
      *
@@ -845,9 +899,12 @@ class AmoxtliService
     private function fallBackOnPandoc(array &$report, string $corpusPath, string $entry, string $error): ?string
     {
         $file = $report['sources'][$entry] ?? null;
-        $fallback = $file.'.txt';
-        // Nom déjà pris : $entry est elle-même une conversion, ou un autre fichier porte ce nom.
-        if (null === $file || !str_starts_with($error, self::CHUNK_PANIC) || isset($report['sources'][$fallback])) {
+        if (null === $file || !str_starts_with($error, self::CHUNK_PANIC)) {
+            return null;
+        }
+        // Nom déjà pris : $entry est elle-même un texte extrait, ou un autre fichier porte ce nom.
+        $fallback = $this->textEntry($file);
+        if (isset($report['sources'][$fallback])) {
             return null;
         }
 
@@ -986,12 +1043,6 @@ class AmoxtliService
 
     private function docToText(string $file): string
     {
-        // Un .doc enregistré au format Word 2007+ ou en RTF : antiword le refuse, pandoc le lit.
-        $format = $this->disguisedDocFormat($file);
-        if (null !== $format) {
-            return $this->run(['pandoc', '-f', $format, '-t', 'plain', '--wrap=none', $file]);
-        }
-
         // catdoc rend le texte le plus propre mais refuse certains .doc (ceux
         // écrits par LibreOffice) qu'antiword lit, tableaux en ASCII compris.
         try {
@@ -1010,19 +1061,29 @@ class AmoxtliService
     }
 
     /**
-     * Format réel d'un .doc qui n'en est pas un, d'après ses premiers octets :
-     * un .docx est un zip, un RTF commence par "{\rtf". null pour un vrai .doc
-     * (document OLE2).
+     * Format réel d'un .doc qui n'en est pas un, d'après son début : un .docx
+     * est un zip, un RTF commence par "{\rtf", une page web par <html> ou, à
+     * fichier unique (MHTML, ce qu'écrivent les exports « Word » de bien des
+     * applications), par des en-têtes MIME. null pour un vrai .doc (document
+     * OLE2), ou un format inconnu.
      */
     private function disguisedDocFormat(string $file): ?string
     {
-        $head = (string) file_get_contents($file, false, null, 0, 5);
+        // Supprimée depuis la liste des pièces : la suite du passage l'ignore.
+        $head = (string) @file_get_contents($file, false, null, 0, 1024);
 
         return match (true) {
             str_starts_with($head, "PK\x03\x04") => 'docx',
             str_starts_with($head, '{\rtf') => 'rtf',
+            1 === preg_match('/\A(\xEF\xBB\xBF)?\s*(<\?xml[^>]*>\s*)?<(!doctype\s+html|html)\b/i', $head) => 'html',
+            1 === preg_match('/\A([\w-]+:.*\R([ \t].*\R)*)*MIME-Version:/i', $head) => 'mhtml',
             default => null,
         };
+    }
+
+    private function mhtmlToHtml(string $file): string
+    {
+        return $this->run(['python3', '-c', self::MHTML_TO_HTML, $file]);
     }
 
     private function spreadsheetToText(string $file): string

@@ -75,6 +75,18 @@ Déclenchée :
    marché, et retiré du corpus puis de l'index : amoxtli y garderait sinon sa
    version précédente.
 
+   amoxtli 0.17.3 plante aussi sur certains documents qu'il lit d'ordinaire :
+   son découpage en sections échoue sur un titre de plus de 250 mots qui mêle
+   texte et mise en forme, du gras par exemple (« runtime error: slice bounds
+   out of range » ; un titre de texte seul passe). Le texte brut que `pandoc`
+   extrait de la copie, sans titres, est alors indexé à sa place
+   (`<nom complet>.txt`, ex. `DC2.docx.txt`), jusqu'à ce que la pièce ou la
+   version d'amoxtli change ; au `sync` comme à l'`add`, par lots eux aussi.
+   Une pièce déposée sous ce nom passe avant : celle qui fait planter amoxtli
+   est alors signalée illisible. Si pandoc échoue sans refuser la pièce (délai
+   dépassé, outil absent), elle est retentée au passage suivant, comme après
+   tout autre plantage d'amoxtli.
+
    Les recherches et listes de documents (chat PHP, onglet du marché, outils
    de l'agent Go) relancent la commande tant que le workspace est pris, au
    plus 20 s ; l'indexation attend de même une recherche en cours, au plus
@@ -96,8 +108,8 @@ Un passage sans changement prend environ 1 s.
 |--------|------------|
 | `.txt`, `.md`, `.docx`, `.odt`, `.rtf`, `.html`, `.rst`, `.epub`, `.tex` | lus par amoxtli (pandoc), copiés tels quels |
 | `.pdf` | `pdftotext -layout`. Un PDF sans texte (ou de plus de 50 Ko avec moins de 100 caractères) est signalé « PDF image, OCR requis » |
-| `.doc` | `catdoc`, ou `antiword` pour les `.doc` que catdoc refuse (ceux écrits par LibreOffice) |
-| `.xlsx`, `.xls` | toutes les feuilles en CSV, chacune précédée de `## Feuille : <nom>` (openpyxl, xlrd). Les cellules donnent la valeur affichée : résultat des formules (celui enregistré par le tableur), nombres sans `.0`, dates en `AAAA-MM-JJ` |
+| `.doc` | `catdoc`, ou `antiword` pour les `.doc` que catdoc refuse (ceux écrits par LibreOffice). Un `.doc` enregistré dans un autre format, reconnu à son début, est lu par amoxtli sous ce format, titres compris : Word 2007+ (un zip) copié en `.doc.docx`, RTF en `.doc.rtf`, page web en `.doc.html`, page web à fichier unique (MHTML, export « Word » de bien des applications) réduite à sa page HTML en `.doc.html` |
+| `.xlsx`, `.xls` | toutes les feuilles en CSV, chacune précédée de `## Feuille : <nom>` (openpyxl pour un zip, xlrd pour un document OLE2, quelle que soit l'extension ; sinon d'après l'extension, xlrd lisant aussi les anciens `.xls` BIFF2 à 4). Les cellules donnent la valeur affichée : résultat des formules (celui enregistré par le tableur), nombres sans `.0`, dates en `AAAA-MM-JJ` |
 | `.csv` | copié en `.csv.txt` (converti en UTF-8 s'il est en Windows-1252) |
 | autres (`.pptx`, `.ods`, `.zip`, images…) | non indexés, signalés « format non pris en charge » |
 

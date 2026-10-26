@@ -29,6 +29,7 @@ use Symfony\Component\Process\Process;
  *     failed: list<array{file: string, reason: string, retry?: true}>,
  *     sources: array<string, string>,
  *     fingerprints: array<string, string>,
+ *     fallbacks: array<string, string>,
  * }
  */
 class AmoxtliService
@@ -60,6 +61,13 @@ class AmoxtliService
     private const BUSY_ERROR = 'workspace is already in use';
     private const READ_WAIT = 20;
     private const WRITE_WAIT = 60;
+
+    /**
+     * Plantage d'amoxtli 0.17.3 en découpant certains documents en sections
+     * ("runtime error: slice bounds out of range [3998:2000]"). Ses autres
+     * plantages ne mettent pas forcément la pièce en cause : ils sont retentés.
+     */
+    private const CHUNK_PANIC = 'runtime error: slice bounds out of range';
 
     /** Lot d'entrées indexées en un appel : quelques secondes d'indexation en texte intégral. */
     private const ADD_BATCH_SIZE = 1_000_000;
@@ -95,16 +103,24 @@ class AmoxtliService
             return c.value
 
         def sheets():
-            if path.lower().endswith(".xls"):
+            # Le contenu décide avant l'extension : un .xls est un document OLE2, un .xlsx un zip, et l'un porte parfois le nom de l'autre.
+            # Sans l'une ni l'autre signature, l'extension : xlrd lit aussi d'anciens .xls (BIFF2 à 4) qui ne sont pas des documents OLE2.
+            with open(path, "rb") as f:
+                head = f.read(8)
+            zipped = head.startswith(b"PK\x03\x04")
+            ole2 = head == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+            if ole2 or (not zipped and path.lower().endswith(".xls")):
                 import xlrd
-                book = xlrd.open_workbook(path)
+                # xlrd écrit ses avertissements sur stdout, donc dans le texte indexé (ex. "*** No CODEPAGE record").
+                book = xlrd.open_workbook(path, logfile=sys.stderr)
                 for sheet in book.sheets():
                     yield sheet.name, ([xls_cell(c, book.datemode) for c in sheet.row(i)] for i in range(sheet.nrows))
             else:
                 import openpyxl
                 # Sans data_only, openpyxl rend le texte des formules (=D5*E5) au lieu de leur résultat.
                 # read_only lit les lignes au fil de l'eau : dix fois moins de mémoire.
-                for sheet in openpyxl.load_workbook(path, data_only=True, read_only=True).worksheets:
+                # Le fichier ouvert plutôt que son nom : openpyxl refuse un nom en .xls.
+                for sheet in openpyxl.load_workbook(open(path, "rb"), data_only=True, read_only=True).worksheets:
                     # En read_only, openpyxl s'arrête à la plage déclarée par le fichier, parfois fausse.
                     sheet.reset_dimensions()
                     yield sheet.title, sheet.values
@@ -119,22 +135,59 @@ class AmoxtliService
                 return v.date().isoformat() if v.time() == datetime.time() else v.isoformat(sep=" ")
             return v
 
-        for name, rows in sheets():
-            lines = []
-            for row in rows:
-                cells = [text(v) for v in row]
-                while cells and cells[-1] == "":
-                    cells.pop()
-                if cells:
-                    lines.append(cells)
-            if lines:
-                sys.stdout.write("## Feuille : %s\n\n" % name)
-                out.writerows(lines)
-                sys.stdout.write("\n")
+        def describe(e):
+            lines = str(e).strip().splitlines()
+            return type(e).__name__ + (": " + lines[0] if lines else "")
+
+        try:
+            for name, rows in sheets():
+                lines = []
+                for row in rows:
+                    cells = [text(v) for v in row]
+                    while cells and cells[-1] == "":
+                        cells.pop()
+                    if cells:
+                        lines.append(cells)
+                if lines:
+                    sys.stdout.write("## Feuille : %s\n\n" % name)
+                    out.writerows(lines)
+                    sys.stdout.write("\n")
+        except Exception as e:
+            # PHP ne garde que la dernière ligne de la sortie d'erreur, tronquée.
+            # openpyxl enveloppe ses erreurs de lecture dans un message de trois
+            # lignes qui finit par "Please see the exception for more details." :
+            # la cause d'origine d'abord, puis le contexte, sur une seule ligne.
+            # Une chaîne peut boucler (une exception levée depuis sa propre cause) : chacune n'y figure qu'une fois.
+            chain = []
+            seen = set()
+            while e is not None and id(e) not in seen:
+                seen.add(id(e))
+                chain.insert(0, describe(e))
+                e = e.__cause__ or (None if e.__suppress_context__ else e.__context__)
+            sys.exit(" ; ".join(chain))
+        PY;
+
+    /**
+     * Page HTML d'une page web à fichier unique (MHTML), en UTF-8 : le module
+     * email décode le quoted-printable et le jeu de caractères de la partie.
+     * Les autres parties (images, styles) sont laissées.
+     */
+    private const MHTML_TO_HTML = <<<'PY'
+        import email, email.policy, sys
+
+        with open(sys.argv[1], "rb") as f:
+            message = email.message_from_binary_file(f, policy=email.policy.default)
+        for part in message.walk():
+            if part.get_content_type() == "text/html":
+                sys.stdout.buffer.write(part.get_content().encode())
+                break
+        else:
+            sys.exit("aucune page HTML")
         PY;
 
     private string $projectDir;
     private string $binaryPath = '/usr/local/bin/amoxtli';
+    private ?string $amoxtliVersion = null;
 
     public function __construct(
         KernelInterface $kernel,
@@ -242,14 +295,17 @@ class AmoxtliService
             $this->addChangedEntries($report, $workspacePath, $corpusPath, $lock);
 
             // Le sync retire de l'index les entrées sorties du corpus, et ne
-            // refait pas celles qui viennent d'être indexées.
+            // refait pas celles qui viennent d'être indexées. Une entrée en
+            // échec, retirée du corpus ou remplacée par son texte de repli,
+            // demande un sync de plus.
             do {
                 $lock->refresh();
-                $removed = false;
+                $changed = false;
                 foreach ($this->syncCorpus($workspacePath, $corpusPath, count($report['sources'])) as $entry => $error) {
-                    $removed = $this->rejectEntry($report, $corpusPath, $entry, $error) || $removed;
+                    $changed = is_file($corpusPath.'/'.$entry) || $changed;
+                    $this->handleFailedEntry($report, $corpusPath, $entry, $error);
                 }
-            } while ($removed);
+            } while ($changed);
 
             // Le message d'erreur d'un convertisseur peut ne pas être en UTF-8 : il ne doit pas empêcher d'écrire le rapport.
             $json = json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR);
@@ -313,27 +369,28 @@ class AmoxtliService
         // Un échec qui ne tient pas à la pièce (délai, outil absent…) est retenté.
         $failures = array_column(array_filter($previous['failed'] ?? [], fn (array $failure): bool => !($failure['retry'] ?? false)), 'reason', 'file');
 
-        $report = ['converted' => [], 'copied' => [], 'removed' => [], 'unsupported' => [], 'failed' => [], 'sources' => [], 'fingerprints' => []];
+        $report = ['converted' => [], 'copied' => [], 'removed' => [], 'unsupported' => [], 'failed' => [], 'sources' => [], 'fingerprints' => [], 'fallbacks' => []];
         $converters = $this->converters();
 
+        $pieces = [];
         foreach (is_dir($marketPath) ? $this->listFiles($marketPath) : [] as $path) {
             // Le rapport est en JSON : un nom qui n'est pas en UTF-8 (archive
             // extraite sous Windows…) y serait altéré, et ne correspondrait
             // plus au passage suivant. Comme les CSV, il est lu en Windows-1252.
             $file = mb_check_encoding($path, 'UTF-8') ? $path : mb_convert_encoding($path, 'UTF-8', 'Windows-1252');
-            $extension = strtolower(pathinfo($file, PATHINFO_EXTENSION));
-            $converter = $converters[$extension] ?? null;
-
-            if (null !== $converter) {
-                // L'extension d'origine reste dans le nom : devis.pdf et devis.xlsx ne se marchent pas dessus.
-                $entry = $file.'.txt';
-            } elseif (in_array($extension, self::NATIVE_EXTENSIONS, true)) {
-                $entry = substr($file, 0, -strlen($extension)).$extension;
-            } else {
+            $piece = $this->corpusEntry($marketPath.'/'.$path, $file, $converters);
+            if (null === $piece) {
                 $report['unsupported'][] = $file;
                 continue;
             }
 
+            $pieces[] = [$path, $file, ...$piece];
+        }
+        // Le texte de repli d'une pièce (DC2.docx.txt) ne prend pas le nom
+        // d'une autre, qui vient après elle dans l'ordre alphabétique.
+        $claimed = array_flip(array_column($pieces, 3));
+
+        foreach ($pieces as [$path, $file, $converter, $entry]) {
             if (isset($report['sources'][$entry])) {
                 $report['failed'][] = ['file' => $file, 'reason' => sprintf('même nom dans l\'index que %s', $report['sources'][$entry])];
                 continue;
@@ -365,6 +422,18 @@ class AmoxtliService
             }
 
             if ($unchanged && is_file($target)) {
+                continue;
+            }
+
+            // amoxtli a planté sur cette version : son texte extrait par pandoc
+            // la remplace tant qu'elle ne change pas, ni amoxtli (voir fallBackOnPandoc()).
+            $fallback = $this->textEntry($file);
+            if ($unchanged && ($previous['sources'][$fallback] ?? null) === $file
+                && !isset($claimed[$fallback]) && is_file($corpusPath.'/'.$fallback)
+                && ($previous['fallbacks'][$file] ?? null) === $this->getAmoxtliVersion()) {
+                unset($report['sources'][$entry]);
+                $report['sources'][$fallback] = $file;
+                $report['fallbacks'][$file] = $previous['fallbacks'][$file];
                 continue;
             }
 
@@ -401,6 +470,48 @@ class AmoxtliService
         }
 
         return $report;
+    }
+
+    /**
+     * Entrée du corpus d'une pièce, et le convertisseur qui l'écrit (null :
+     * copiée telle quelle).
+     *
+     * @param array<string, \Closure(string): string> $converters
+     *
+     * @return array{(\Closure(string): string)|null, string}|null null si son format n'est pas pris en charge
+     */
+    private function corpusEntry(string $source, string $file, array $converters): ?array
+    {
+        $extension = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+
+        // Un .doc enregistré dans un format qu'amoxtli lit (antiword le
+        // refuse) est indexé sous ce format, titres compris : AE.doc.docx.
+        $format = 'doc' === $extension ? $this->disguisedDocFormat($source) : null;
+        if ('mhtml' === $format) {
+            return [$this->mhtmlToHtml(...), $file.'.html'];
+        }
+        if (null !== $format) {
+            return [null, $file.'.'.$format];
+        }
+
+        if (isset($converters[$extension])) {
+            return [$converters[$extension], $this->textEntry($file)];
+        }
+        if (in_array($extension, self::NATIVE_EXTENSIONS, true)) {
+            return [null, substr($file, 0, -strlen($extension)).$extension];
+        }
+
+        return null;
+    }
+
+    /**
+     * Entrée du texte extrait d'une pièce, par son convertisseur ou par
+     * fallBackOnPandoc(). L'extension d'origine reste dans le nom : devis.pdf
+     * et devis.xlsx ne se marchent pas dessus.
+     */
+    private function textEntry(string $file): string
+    {
+        return $file.'.txt';
     }
 
     /**
@@ -629,7 +740,7 @@ class AmoxtliService
     }
 
     /**
-     * @return array{unsupported?: list<string>, failed?: list<array{file: string, reason: string, retry?: true}>, sources?: array<string, string>, fingerprints?: array<string, string>}
+     * @return array{unsupported?: list<string>, failed?: list<array{file: string, reason: string, retry?: true}>, sources?: array<string, string>, fingerprints?: array<string, string>, fallbacks?: array<string, string>}
      */
     private function readReport(string $id): array
     {
@@ -694,15 +805,42 @@ class AmoxtliService
     private function addChangedEntries(array &$report, string $workspacePath, string $corpusPath, SharedLockInterface $lock): void
     {
         $changed = array_flip([...$report['converted'], ...$report['copied']]);
+        $entries = array_keys(array_filter($report['sources'], fn (string $file): bool => isset($changed[$file])));
 
+        // Les textes de repli des entrées sur lesquelles amoxtli a planté sont indexés ensuite, par lots eux aussi.
+        while ([] !== $entries) {
+            $fallbacks = [];
+            foreach ($this->batches($corpusPath, $entries) as $batch) {
+                // Le verrou du marché expire : chaque lot le prolonge.
+                $lock->refresh();
+                foreach ($this->addEntries($workspacePath, $corpusPath, $batch) as $entry => $error) {
+                    $fallback = $this->handleFailedEntry($report, $corpusPath, $entry, $error);
+                    if (null !== $fallback) {
+                        $fallbacks[] = $fallback;
+                    }
+                }
+
+                // Sans pause, le lot suivant reprendrait le workspace avant les
+                // recherches qui attendent, relancées toutes les 200 ms.
+                usleep(self::ADD_BATCH_PAUSE);
+            }
+            $entries = $fallbacks;
+        }
+    }
+
+    /**
+     * Lots d'au plus ADD_BATCH_SIZE octets ou ADD_BATCH_FILES entrées.
+     *
+     * @param list<string> $entries
+     *
+     * @return list<list<string>>
+     */
+    private function batches(string $corpusPath, array $entries): array
+    {
         $batches = [];
         $batch = [];
         $size = 0;
-        foreach ($report['sources'] as $entry => $file) {
-            if (!isset($changed[$file])) {
-                continue;
-            }
-
+        foreach ($entries as $entry) {
             $batch[] = $entry;
             $size += (int) filesize($corpusPath.'/'.$entry);
             if ($size >= self::ADD_BATCH_SIZE || count($batch) >= self::ADD_BATCH_FILES) {
@@ -715,17 +853,97 @@ class AmoxtliService
             $batches[] = $batch;
         }
 
-        foreach ($batches as $batch) {
-            // Le verrou du marché expire : chaque lot le prolonge.
-            $lock->refresh();
-            foreach ($this->addEntries($workspacePath, $corpusPath, $batch) as $entry => $error) {
-                $this->rejectEntry($report, $corpusPath, $entry, $error);
-            }
+        return $batches;
+    }
 
-            // Sans pause, le lot suivant reprendrait le workspace avant les
-            // recherches qui attendent, relancées toutes les 200 ms.
-            usleep(self::ADD_BATCH_PAUSE);
+    /**
+     * Une entrée qu'amoxtli n'a pas su indexer : remplacée par son texte brut
+     * s'il a planté dessus (fallBackOnPandoc()), sinon retirée du corpus.
+     *
+     * @param CorpusReport $report
+     *
+     * @return string|null l'entrée qui la remplace, à indexer
+     */
+    private function handleFailedEntry(array &$report, string $corpusPath, string $entry, string $error): ?string
+    {
+        try {
+            $fallback = $this->fallBackOnPandoc($report, $corpusPath, $entry, $error);
+        } catch (\RuntimeException $e) {
+            // Sans texte de repli, rien ne dit que la pièce est illisible : elle est retentée.
+            $this->rejectEntry($report, $corpusPath, $entry, $error.' ; '.$e->getMessage(), true);
+
+            return null;
         }
+
+        if (null === $fallback) {
+            $this->rejectEntry($report, $corpusPath, $entry, $error);
+        }
+
+        return $fallback;
+    }
+
+    /**
+     * amoxtli plante sur certains documents qu'il lit d'ordinaire : son
+     * découpage en sections échoue sur un titre de plus de 250 mots qui mêle
+     * texte et mise en forme, gras par exemple ("runtime error: slice bounds
+     * out of range", amoxtli 0.17.3). Le texte brut que pandoc extrait de la
+     * copie, sans titres, la remplace alors. Le rapport garde la version
+     * d'amoxtli : une autre le relira peut-être.
+     *
+     * @param CorpusReport $report
+     *
+     * @throws \RuntimeException si pandoc échoue sans refuser la pièce (délai dépassé, pandoc absent), ou si le texte n'a pas pu être écrit
+     *
+     * @return string|null l'entrée qui remplace $entry, à indexer
+     */
+    private function fallBackOnPandoc(array &$report, string $corpusPath, string $entry, string $error): ?string
+    {
+        $file = $report['sources'][$entry] ?? null;
+        if (null === $file || !str_starts_with($error, self::CHUNK_PANIC)) {
+            return null;
+        }
+        // Nom déjà pris : $entry est elle-même un texte extrait, ou un autre fichier porte ce nom.
+        $fallback = $this->textEntry($file);
+        if (isset($report['sources'][$fallback])) {
+            return null;
+        }
+
+        try {
+            $text = $this->run(['pandoc', '-t', 'plain', '--wrap=none', $corpusPath.'/'.$entry]);
+        } catch (\UnexpectedValueException) {
+            // pandoc refuse lui aussi la pièce.
+            return null;
+        }
+        if (!preg_match('/\S/', $text)) {
+            return null;
+        }
+
+        // Le texte d'abord : s'il n'est pas écrit, la copie reste à retirer par rejectEntry().
+        $fs = new Filesystem();
+        $fs->dumpFile($corpusPath.'/'.$fallback, $text);
+        $fs->remove($corpusPath.'/'.$entry);
+        unset($report['sources'][$entry]);
+        $report['sources'][$fallback] = $file;
+        $report['fallbacks'][$file] = $this->getAmoxtliVersion();
+        $report['copied'] = array_values(array_diff($report['copied'], [$file]));
+        $report['converted'][] = $file;
+
+        return $fallback;
+    }
+
+    /**
+     * Version d'amoxtli ("amoxtli version 0.17.3 (…)"), lue une fois.
+     */
+    private function getAmoxtliVersion(): string
+    {
+        if (null === $this->amoxtliVersion) {
+            $process = new Process([$this->binaryPath, '--version']);
+            $process->setTimeout(10);
+            $process->run();
+            $this->amoxtliVersion = trim($process->getOutput());
+        }
+
+        return $this->amoxtliVersion;
     }
 
     /**
@@ -770,29 +988,27 @@ class AmoxtliService
      * garde la version précédente, qui quitte l'index au sync suivant.
      *
      * @param CorpusReport $report
-     *
-     * @return bool si l'entrée était encore dans le corpus
+     * @param bool         $retry  retentée au passage suivant, même si $error met la pièce en cause
      */
-    private function rejectEntry(array &$report, string $corpusPath, string $entry, string $error): bool
+    private function rejectEntry(array &$report, string $corpusPath, string $entry, string $error, bool $retry = false): void
     {
-        $present = is_file($corpusPath.'/'.$entry);
         (new Filesystem())->remove($corpusPath.'/'.$entry);
 
         // "exit status 63" : le convertisseur d'amoxtli (pandoc) a refusé le
-        // fichier ; un délai dépassé ou une erreur d'embeddings ne dit rien de la pièce.
-        $rejected = preg_match('/^exit status (\d+)$/', $error, $match) && $this->rejectsFile((int) $match[1]);
+        // fichier ; CHUNK_PANIC : amoxtli a planté sur son contenu. Un délai
+        // dépassé ou une erreur d'embeddings ne dit rien de la pièce.
+        $rejected = !$retry && ((preg_match('/^exit status (\d+)$/', $error, $match) && $this->rejectsFile((int) $match[1]))
+            || str_starts_with($error, self::CHUNK_PANIC));
 
         $file = $report['sources'][$entry] ?? $entry;
         $report['failed'][] = [
             'file' => $file,
             'reason' => sprintf('illisible par amoxtli (%s)', $error),
         ] + ($rejected ? [] : ['retry' => true]);
-        unset($report['sources'][$entry]);
+        unset($report['sources'][$entry], $report['fallbacks'][$file]);
         // Pas indexée : le rapport ne la compte pas aussi comme convertie ou copiée.
         $report['converted'] = array_values(array_diff($report['converted'], [$file]));
         $report['copied'] = array_values(array_diff($report['copied'], [$file]));
-
-        return $present;
     }
 
     /**
@@ -842,6 +1058,32 @@ class AmoxtliService
 
         // Codes des champs de formulaire Word (cases à cocher des AE, DC1, DC2…).
         return str_replace(['FORMCHECKBOX', 'FORMTEXT', 'FORMDROPDOWN'], '', $text);
+    }
+
+    /**
+     * Format réel d'un .doc qui n'en est pas un, d'après son début : un .docx
+     * est un zip, un RTF commence par "{\rtf", une page web par <html> ou, à
+     * fichier unique (MHTML, ce qu'écrivent les exports « Word » de bien des
+     * applications), par des en-têtes MIME. null pour un vrai .doc (document
+     * OLE2), ou un format inconnu.
+     */
+    private function disguisedDocFormat(string $file): ?string
+    {
+        // Supprimée depuis la liste des pièces : la suite du passage l'ignore.
+        $head = (string) @file_get_contents($file, false, null, 0, 1024);
+
+        return match (true) {
+            str_starts_with($head, "PK\x03\x04") => 'docx',
+            str_starts_with($head, '{\rtf') => 'rtf',
+            1 === preg_match('/\A(\xEF\xBB\xBF)?\s*(<\?xml[^>]*>\s*)?<(!doctype\s+html|html)\b/i', $head) => 'html',
+            1 === preg_match('/\A([\w-]+:.*\R([ \t].*\R)*)*MIME-Version:/i', $head) => 'mhtml',
+            default => null,
+        };
+    }
+
+    private function mhtmlToHtml(string $file): string
+    {
+        return $this->run(['python3', '-c', self::MHTML_TO_HTML, $file]);
     }
 
     private function spreadsheetToText(string $file): string

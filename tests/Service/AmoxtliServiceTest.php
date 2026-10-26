@@ -168,6 +168,74 @@ class AmoxtliServiceTest extends TestCase
         $this->assertSame(['AE.doc.txt'], $this->search('quebecdoc'));
     }
 
+    public function testDocSavedInAnotherFormatIsReadInThatFormat(): void
+    {
+        // Enregistrés au format Word 2007+, en RTF ou en page web sous l'extension .doc : antiword les refuse.
+        $this->docx('AE.docx', "# Acte\n\nCorps ooxmldoc.");
+        rename($this->marketPath.'/AE.docx', $this->marketPath.'/AE.doc');
+        $process = new Process(['pandoc', '-f', 'markdown', '-s', '-t', 'rtf', '-o', $this->marketPath.'/DC1.doc']);
+        $process->setInput("# Lettre\n\nCorps rtfdoc.");
+        $process->mustRun();
+        file_put_contents($this->marketPath.'/DC2.doc', '<html xmlns:w="urn:schemas-microsoft-com:office:word"><body><h1>Déclaration</h1><p>Corps htmldoc.</p></body></html>');
+        // Page web à fichier unique : la page en quoted-printable et en Windows-1252, suivie de ses images.
+        file_put_contents($this->marketPath.'/DC4.doc', implode("\r\n", [
+            'MIME-Version: 1.0',
+            'Content-Type: multipart/related; boundary="----=_NextPart_01"',
+            '',
+            '------=_NextPart_01',
+            'Content-Transfer-Encoding: quoted-printable',
+            'Content-Type: text/html; charset="windows-1252"',
+            '',
+            '<html><body><h1>Engagement</h1><p class=3DMsoNormal>Corps mhtml=',
+            'doc r=E9ponse.</p></body></html>',
+            '',
+            '------=_NextPart_01',
+            'Content-Transfer-Encoding: base64',
+            'Content-Type: image/png',
+            '',
+            'iVBORw0KGgo=',
+            '',
+            '------=_NextPart_01--',
+            '',
+        ]));
+
+        $report = $this->index();
+
+        $this->assertSame(['AE.doc', 'DC1.doc', 'DC2.doc'], $report['copied']);
+        $this->assertSame(['DC4.doc'], $report['converted']);
+        $this->assertSame(['AE.doc', 'DC1.doc', 'DC2.doc', 'DC4.doc'], $this->indexedFiles());
+        $this->assertSame(["# Acte\n\nCorps ooxmldoc."], $this->searchSections('ooxmldoc'));
+        $this->assertSame(["# Lettre\n\nCorps rtfdoc."], $this->searchSections('rtfdoc'));
+        $this->assertSame(["# Déclaration\n\nCorps htmldoc."], $this->searchSections('htmldoc'));
+        $this->assertSame(["# Engagement\n\nCorps mhtmldoc réponse."], $this->searchSections('mhtmldoc'));
+    }
+
+    public function testSpreadsheetUnderTheOtherExtensionIsConverted(): void
+    {
+        copy(self::FIXTURES.'/deux-feuilles.xls', $this->marketPath.'/bpu.xlsx');
+        copy(self::FIXTURES.'/deux-feuilles.xlsx', $this->marketPath.'/dqe.xls');
+
+        $report = $this->index();
+
+        $this->assertSame(['bpu.xlsx', 'dqe.xls'], $report['converted']);
+        $this->assertSame(['bpu.xlsx.txt', 'dqe.xls.txt'], $this->search('secondfeuillet'));
+    }
+
+    public function testOldXlsWithoutOle2ContainerIsConverted(): void
+    {
+        // Un .xls BIFF2 (Excel 2) : des enregistrements à la suite, sans document OLE2 autour.
+        $record = fn (int $id, string $data): string => pack('vv', $id, strlen($data)).$data;
+        file_put_contents($this->marketPath.'/dqe.xls', $record(0x0009, pack('vv', 0x0002, 0x0010))
+            .$record(0x0004, pack('vv', 0, 0)."\0\0\0".chr(8).'biffdeux')
+            .$record(0x000A, ''));
+
+        $report = $this->index();
+
+        $this->assertSame(['dqe.xls'], $report['converted']);
+        $this->assertSame(['dqe.xls.txt'], $this->search('biffdeux'));
+        $this->assertSame("## Feuille : Sheet 1\n\n\"biffdeux\"\n\n", file_get_contents($this->corpusPath.'/dqe.xls.txt'));
+    }
+
     public function testUnreadablePiecesAreReportedWithoutFailingTheMarket(): void
     {
         $this->pdf('scan.pdf', '');
@@ -248,15 +316,144 @@ class AmoxtliServiceTest extends TestCase
         $this->assertFileDoesNotExist($this->corpusPath.'/casse.docx');
     }
 
+    public function testDocumentThatCrashesAmoxtliIsIndexedAsText(): void
+    {
+        $this->docxThatCrashesAmoxtli('DC2.docx', 'Corps repliclause.');
+
+        $report = $this->index();
+
+        $this->assertSame([], $report['failed']);
+        $this->assertSame(['DC2.docx'], $report['converted']);
+        $this->assertSame(['DC2.docx.txt'], $this->search('repliclause'));
+        $this->assertSame(['DC2.docx'], $this->indexedFiles());
+
+        // Inchangée, elle garde son texte sans repasser par amoxtli.
+        $report = $this->index();
+        $this->assertSame([], $report['copied']);
+        $this->assertSame([], $report['converted']);
+        $this->assertSame([], $report['removed']);
+        $this->assertSame(['DC2.docx.txt'], $this->search('repliclause'));
+    }
+
+    public function testCrashWithoutPandocTextIsRetried(): void
+    {
+        $this->docxThatCrashesAmoxtli('DC2.docx', 'Corps repliclause.');
+        // pandoc introuvable pour le texte brut (code 127), alors qu'amoxtli lit les .docx avec lui.
+        $bin = $this->projectDir.'/bin';
+        (new Filesystem())->mkdir($bin);
+        file_put_contents($bin.'/pandoc', "#!/bin/sh\ncase \" \$* \" in *' -t plain '*) exit 127 ;; esac\nexec /usr/bin/pandoc \"\$@\"\n");
+        chmod($bin.'/pandoc', 0755);
+        $path = (string) getenv('PATH');
+        putenv('PATH='.$bin.':'.$path);
+        try {
+            $failure = $this->index()['failed'][0];
+        } finally {
+            putenv('PATH='.$path);
+        }
+
+        $this->assertMatchesRegularExpression('/^illisible par amoxtli \(runtime error: slice bounds out of range .* ; échec de pandoc \(code 127\)\)$/', $failure['reason']);
+        $this->assertTrue($failure['retry'] ?? false);
+
+        // Retentée au passage suivant, avec pandoc.
+        $this->assertSame(['DC2.docx'], $this->index()['converted']);
+        $this->assertSame(['DC2.docx.txt'], $this->search('repliclause'));
+    }
+
+    public function testFallbackIsDroppedWhenThePieceChanges(): void
+    {
+        $this->docxThatCrashesAmoxtli('DC2.docx', 'Corps repliclause.');
+        $this->index();
+
+        $this->docx('DC2.docx', 'Corps lisibleclause.');
+        $this->replacedLater('DC2.docx');
+        $report = $this->index();
+
+        $this->assertSame(['DC2.docx'], $report['copied']);
+        $this->assertSame([], $report['converted']);
+        $this->assertSame(['DC2.docx.txt'], $report['removed']);
+        $this->assertSame([], $report['fallbacks']);
+        $this->assertSame(['DC2.docx'], $this->search('lisibleclause'));
+        $this->assertSame([], $this->search('repliclause'));
+    }
+
+    public function testCrashDuringSyncFallsBackOnText(): void
+    {
+        $this->docx('DC2.docx', 'Corps lisibleclause.');
+        $this->index();
+
+        // La pièce n'a pas changé, mais sa copie fait maintenant planter
+        // amoxtli : seul le sync la relit (ex. amoxtli mis à jour, workspace recréé).
+        $this->docxThatCrashesAmoxtli('copie.docx', 'Corps repliclause.');
+        rename($this->marketPath.'/copie.docx', $this->corpusPath.'/DC2.docx');
+        $report = $this->index();
+
+        $this->assertSame([], $report['failed']);
+        $this->assertSame(['DC2.docx'], $report['converted']);
+        $this->assertSame(['DC2.docx.txt'], $this->search('repliclause'));
+        $this->assertSame(['DC2.docx'], $this->indexedFiles());
+    }
+
+    public function testFallbackIsRedoneWhenAmoxtliChanges(): void
+    {
+        $this->docxThatCrashesAmoxtli('DC2.docx', 'Corps repliclause.');
+        $this->index();
+
+        // Le texte de repli vient d'une autre version d'amoxtli, qui a peut-être été corrigée depuis.
+        $reportPath = $this->projectDir.'/uploads/amoxtli/1/corpus-report.json';
+        $previous = json_decode((string) file_get_contents($reportPath), true);
+        $this->assertStringStartsWith('amoxtli version ', $previous['fallbacks']['DC2.docx']);
+        $previous['fallbacks']['DC2.docx'] = 'amoxtli version 0.17.2';
+        file_put_contents($reportPath, json_encode($previous));
+
+        $report = $this->index();
+
+        $this->assertSame(['DC2.docx'], $report['converted']);
+        $this->assertNotSame('amoxtli version 0.17.2', $report['fallbacks']['DC2.docx']);
+        $this->assertSame(['DC2.docx.txt'], $this->search('repliclause'));
+    }
+
+    public function testPieceNamedLikeAFallbackTakesItsPlace(): void
+    {
+        $this->docxThatCrashesAmoxtli('DC2.docx', 'Corps repliclause.');
+        $this->index();
+
+        file_put_contents($this->marketPath.'/DC2.docx.txt', 'Notes deposeclause.');
+        $report = $this->index();
+
+        $this->assertSame(['DC2.docx.txt'], $report['copied']);
+        $this->assertSame(['DC2.docx.txt'], $this->search('deposeclause'));
+        $this->assertSame([], $this->search('repliclause'));
+        $this->assertSame(['DC2.docx.txt'], $this->indexedFiles());
+        $this->assertCount(1, $report['failed']);
+        $this->assertSame('DC2.docx', $report['failed'][0]['file']);
+        $this->assertStringStartsWith('illisible par amoxtli (runtime error: slice bounds out of range', $report['failed'][0]['reason']);
+        $this->assertArrayNotHasKey('retry', $report['failed'][0]);
+    }
+
     public function testUnreadableSpreadsheetIsNotRetried(): void
     {
         file_put_contents($this->marketPath.'/casse.xlsx', 'pas un zip');
 
         $failure = $this->index()['failed'][0];
 
-        $this->assertStringStartsWith('échec de python3', $failure['reason']);
+        $this->assertSame('échec de python3 (BadZipFile: File is not a zip file)', $failure['reason']);
         $this->assertArrayNotHasKey('retry', $failure);
         $this->assertSame([], $this->index()['converted']);
+    }
+
+    public function testSpreadsheetFailureGivesItsCause(): void
+    {
+        // openpyxl enveloppe l'erreur d'un style inconnu dans un message qui
+        // finit par "Please see the exception for more details.".
+        copy(self::FIXTURES.'/deux-feuilles.xlsx', $this->marketPath.'/bpu.xlsx');
+        $zip = new \ZipArchive();
+        $zip->open($this->marketPath.'/bpu.xlsx');
+        $zip->addFromString('xl/styles.xml', str_replace('<left/>', '<left style="inconnu"/>', (string) $zip->getFromName('xl/styles.xml')));
+        $zip->close();
+
+        $failure = $this->index()['failed'][0];
+
+        $this->assertStringStartsWith('échec de python3 (ValueError: Value must be one of', $failure['reason']);
     }
 
     public function testFailureUnrelatedToThePieceIsRetried(): void
@@ -488,6 +685,14 @@ class AmoxtliServiceTest extends TestCase
         $process->mustRun();
     }
 
+    private function docxThatCrashesAmoxtli(string $file, string $body): void
+    {
+        // amoxtli 0.17.3 plante sur un titre de plus de 250 mots qui mêle texte
+        // et mise en forme (runtime error: slice bounds out of range).
+        $words = implode(' ', array_map(fn (int $i): string => 'mot'.$i, range(1, 300)));
+        $this->docx($file, "# Titre $words *gras* $words\n\n$body");
+    }
+
     /**
      * Fait tenir le workspace par un autre processus amoxtli pendant
      * $seconds secondes, comme une recherche ou une indexation en cours.
@@ -540,10 +745,26 @@ class AmoxtliServiceTest extends TestCase
      */
     private function searchSources(string $word): array
     {
+        return array_column($this->searchResults($word), 'source');
+    }
+
+    /**
+     * @return list<string> texte des sections trouvées, titres compris
+     */
+    private function searchSections(string $word): array
+    {
+        return array_merge([], ...array_map(fn (array $result): array => array_column($result['sections'] ?? [], 'content'), $this->searchResults($word)));
+    }
+
+    /**
+     * @return list<array<string, mixed>> résultats d'amoxtli search
+     */
+    private function searchResults(string $word): array
+    {
         $process = new Process(['/usr/local/bin/amoxtli', '--json', '-C', $this->projectDir.'/uploads/amoxtli/1', 'search', $word]);
         $process->mustRun();
 
-        return array_column(json_decode($process->getOutput(), true)['results'] ?? [], 'source');
+        return json_decode($process->getOutput(), true)['results'] ?? [];
     }
 
     /**

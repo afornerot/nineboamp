@@ -98,8 +98,23 @@ class OidcAuthenticator extends AbstractAuthenticator
         return null;
     }
 
+    /**
+     * Un échec d'échange de code ne doit pas relancer le fournisseur : sans
+     * cette réponse, l'exception remonte au firewall, l'entry point régénère
+     * une URL d'autorisation et l'utilisateur boucle indéfiniment sans
+     * connaître la cause (client_secret erroné, redirect_uri non enregistré...).
+     */
     public function onAuthenticationFailure(Request $request, AuthenticationException $exception): ?Response
     {
-        throw $exception;
+        return new Response(
+            '<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">'
+            .'<title>Échec de l\'authentification OIDC</title></head><body>'
+            .'<h1>Échec de l\'authentification OIDC</h1>'
+            .'<p>'.htmlspecialchars($exception->getMessage(), ENT_QUOTES, 'UTF-8').'</p>'
+            .'<p><a href="'.$this->urlGenerator->generate('app_login').'">Réessayer</a></p>'
+            .'</body></html>',
+            Response::HTTP_UNAUTHORIZED,
+            ['Content-Type' => 'text/html; charset=utf-8']
+        );
     }
 }

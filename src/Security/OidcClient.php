@@ -100,6 +100,22 @@ class OidcClient
             throw new AuthenticationException('OIDC: réponse token_endpoint illisible.', 0, $e);
         }
 
+        // Le fournisseur signale ses refus dans error/error_description. Les
+        // tester avant id_token évite de masquer la cause réelle (client non
+        // autorisé, redirect_uri non enregistré, code expiré...) derrière un
+        // « id_token absent » trompeur.
+        if (isset($token['error'])) {
+            $description = \is_string($token['error_description'] ?? null) && '' !== $token['error_description']
+                ? $token['error_description']
+                : 'sans description';
+
+            throw new AuthenticationException(sprintf(
+                'OIDC: le fournisseur a refusé l\'échange du code (%s : %s).',
+                (string) $token['error'],
+                $description
+            ));
+        }
+
         if (!\is_string($token['id_token'] ?? null) || '' === $token['id_token']) {
             throw new AuthenticationException('OIDC: id_token absent de la réponse du provider.');
         }

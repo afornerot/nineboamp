@@ -120,7 +120,42 @@ class OidcClient
             throw new AuthenticationException('OIDC: id_token absent de la réponse du provider.');
         }
 
-        return $this->decodeIdToken($token['id_token']);
+        $claims = $this->decodeIdToken($token['id_token']);
+
+        // L'id_token du fournisseur ne contient pas toujours les claims de
+        // profil (preferred_username, family_name...). On les complète via
+        // userinfo_endpoint ; l'id_token reste prioritaire grâce à +=.
+        $accessToken = $token['access_token'] ?? null;
+        if (\is_string($accessToken) && '' !== $accessToken) {
+            $claims += $this->fetchUserInfo($accessToken);
+        }
+
+        return $claims;
+    }
+
+    /**
+     * Complète les claims via userinfo_endpoint.
+     *
+     * @return array<string, mixed>
+     */
+    private function fetchUserInfo(string $accessToken): array
+    {
+        $endpoint = $this->discovery['userinfo_endpoint'] ?? null;
+
+        if (!\is_string($endpoint) || '' === $endpoint) {
+            return [];
+        }
+
+        try {
+            $response = $this->httpClient->request('GET', $endpoint, [
+                'headers' => ['Authorization' => 'Bearer '.$accessToken],
+            ]);
+
+            return $response->toArray(false);
+        } catch (\Throwable) {
+            // Un userinfo indisponible ne doit pas bloquer : l'id_token suffit.
+            return [];
+        }
     }
 
     /**

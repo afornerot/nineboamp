@@ -290,6 +290,49 @@ class AmoxtliServiceTest extends TestCase
         $this->assertFileDoesNotExist($this->corpusPath.'/casse.docx');
     }
 
+    public function testDocumentThatCrashesAmoxtliIsIndexedAsText(): void
+    {
+        $this->docxThatCrashesAmoxtli('DC2.docx', 'Corps repliclause.');
+
+        $report = $this->index();
+
+        $this->assertSame([], $report['failed']);
+        $this->assertSame(['DC2.docx'], $report['converted']);
+        $this->assertSame(['DC2.docx.txt'], $this->search('repliclause'));
+        $this->assertSame(['DC2.docx'], $this->indexedFiles());
+
+        // Inchangée, elle garde son texte sans repasser par amoxtli.
+        $report = $this->index();
+        $this->assertSame([], $report['copied']);
+        $this->assertSame([], $report['converted']);
+        $this->assertSame([], $report['removed']);
+        $this->assertSame(['DC2.docx.txt'], $this->search('repliclause'));
+    }
+
+    public function testCrashWithoutPandocTextIsRetried(): void
+    {
+        $this->docxThatCrashesAmoxtli('DC2.docx', 'Corps repliclause.');
+        // pandoc introuvable pour le texte brut (code 127), alors qu'amoxtli lit les .docx avec lui.
+        $bin = $this->projectDir.'/bin';
+        (new Filesystem())->mkdir($bin);
+        file_put_contents($bin.'/pandoc', "#!/bin/sh\ncase \" \$* \" in *' -t plain '*) exit 127 ;; esac\nexec /usr/bin/pandoc \"\$@\"\n");
+        chmod($bin.'/pandoc', 0755);
+        $path = (string) getenv('PATH');
+        putenv('PATH='.$bin.':'.$path);
+        try {
+            $failure = $this->index()['failed'][0];
+        } finally {
+            putenv('PATH='.$path);
+        }
+
+        $this->assertMatchesRegularExpression('/^illisible par amoxtli \(runtime error: slice bounds out of range .* ; échec de pandoc \(code 127\)\)$/', $failure['reason']);
+        $this->assertTrue($failure['retry'] ?? false);
+
+        // Retentée au passage suivant, avec pandoc.
+        $this->assertSame(['DC2.docx'], $this->index()['converted']);
+        $this->assertSame(['DC2.docx.txt'], $this->search('repliclause'));
+    }
+
     public function testUnreadableSpreadsheetIsNotRetried(): void
     {
         file_put_contents($this->marketPath.'/casse.xlsx', 'pas un zip');
@@ -543,6 +586,13 @@ class AmoxtliServiceTest extends TestCase
         $process = new Process(['pandoc', '-f', 'markdown', '-o', $this->marketPath.'/'.$file]);
         $process->setInput($text);
         $process->mustRun();
+    }
+
+    private function docxThatCrashesAmoxtli(string $file, string $body): void
+    {
+        // amoxtli 0.17.3 plante sur un titre de plus de 250 mots (runtime error: slice bounds out of range).
+        $words = implode(' ', array_map(fn (int $i): string => 'mot'.$i, range(1, 300)));
+        $this->docx($file, "# Titre $words *gras* $words\n\n$body");
     }
 
     /**

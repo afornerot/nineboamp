@@ -75,6 +75,14 @@ Déclenchée :
    marché, et retiré du corpus puis de l'index : amoxtli y garderait sinon sa
    version précédente.
 
+   amoxtli 0.17.3 plante aussi sur certains documents qu'il lit d'ordinaire :
+   son découpage en sections échoue sur un titre de plus de 250 mots
+   (« runtime error: slice bounds out of range »). Le texte brut que `pandoc`
+   extrait de la copie, sans titres, est alors indexé à sa place
+   (`<nom complet>.txt`, ex. `DC2.docx.txt`), jusqu'à ce que la pièce change.
+   Si pandoc échoue sans refuser la pièce (délai dépassé, outil absent), elle
+   est retentée au passage suivant, comme après tout autre plantage d'amoxtli.
+
    Les recherches et listes de documents (chat PHP, onglet du marché, outils
    de l'agent Go) relancent la commande tant que le workspace est pris, au
    plus 20 s ; l'indexation attend de même une recherche en cours, au plus

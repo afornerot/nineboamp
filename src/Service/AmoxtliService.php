@@ -61,6 +61,13 @@ class AmoxtliService
     private const READ_WAIT = 20;
     private const WRITE_WAIT = 60;
 
+    /**
+     * Plantage d'amoxtli 0.17.3 en découpant certains documents en sections
+     * ("runtime error: slice bounds out of range [3998:2000]"). Ses autres
+     * plantages ne mettent pas forcément la pièce en cause : ils sont retentés.
+     */
+    private const CHUNK_PANIC = 'runtime error: slice bounds out of range';
+
     /** Lot d'entrées indexées en un appel : quelques secondes d'indexation en texte intégral. */
     private const ADD_BATCH_SIZE = 1_000_000;
     private const ADD_BATCH_FILES = 50;
@@ -388,6 +395,16 @@ class AmoxtliService
             }
 
             if ($unchanged && is_file($target)) {
+                continue;
+            }
+
+            // amoxtli a planté sur cette version : son texte extrait par pandoc
+            // la remplace tant qu'elle ne change pas (voir fallBackOnPandoc()).
+            $fallback = $file.'.txt';
+            if ($unchanged && null === $converter && ($previous['sources'][$fallback] ?? null) === $file
+                && !isset($report['sources'][$fallback]) && is_file($corpusPath.'/'.$fallback)) {
+                unset($report['sources'][$entry]);
+                $report['sources'][$fallback] = $file;
                 continue;
             }
 
@@ -738,17 +755,78 @@ class AmoxtliService
             $batches[] = $batch;
         }
 
+        $fallbacks = [];
         foreach ($batches as $batch) {
             // Le verrou du marché expire : chaque lot le prolonge.
             $lock->refresh();
             foreach ($this->addEntries($workspacePath, $corpusPath, $batch) as $entry => $error) {
-                $this->rejectEntry($report, $corpusPath, $entry, $error);
+                try {
+                    $fallback = $this->fallBackOnPandoc($report, $corpusPath, $entry, $error);
+                } catch (\RuntimeException $e) {
+                    // Sans texte de pandoc, rien ne dit que la pièce est illisible : elle est retentée.
+                    $this->rejectEntry($report, $corpusPath, $entry, $error.' ; '.$e->getMessage(), true);
+                    continue;
+                }
+                if (null === $fallback) {
+                    $this->rejectEntry($report, $corpusPath, $entry, $error);
+                } else {
+                    $fallbacks[] = $fallback;
+                }
             }
 
             // Sans pause, le lot suivant reprendrait le workspace avant les
             // recherches qui attendent, relancées toutes les 200 ms.
             usleep(self::ADD_BATCH_PAUSE);
         }
+
+        if ([] !== $fallbacks) {
+            $lock->refresh();
+            foreach ($this->addEntries($workspacePath, $corpusPath, $fallbacks) as $entry => $error) {
+                $this->rejectEntry($report, $corpusPath, $entry, $error);
+            }
+        }
+    }
+
+    /**
+     * amoxtli plante sur certains documents qu'il lit d'ordinaire : son
+     * découpage en sections échoue sur un titre de plus de 250 mots ("runtime
+     * error: slice bounds out of range", amoxtli 0.17.3). Le texte brut que
+     * pandoc extrait de la copie, sans titres, la remplace alors.
+     *
+     * @param CorpusReport $report
+     *
+     * @throws \RuntimeException si pandoc échoue sans refuser la pièce (délai dépassé, pandoc absent)
+     *
+     * @return string|null l'entrée qui remplace $entry, à indexer
+     */
+    private function fallBackOnPandoc(array &$report, string $corpusPath, string $entry, string $error): ?string
+    {
+        $file = $report['sources'][$entry] ?? null;
+        $fallback = $file.'.txt';
+        // Nom déjà pris : $entry est elle-même une conversion, ou un autre fichier porte ce nom.
+        if (null === $file || !str_starts_with($error, self::CHUNK_PANIC) || isset($report['sources'][$fallback])) {
+            return null;
+        }
+
+        try {
+            $text = $this->run(['pandoc', '-t', 'plain', '--wrap=none', $corpusPath.'/'.$entry]);
+        } catch (\UnexpectedValueException) {
+            // pandoc refuse lui aussi la pièce.
+            return null;
+        }
+        if (!preg_match('/\S/', $text)) {
+            return null;
+        }
+
+        $fs = new Filesystem();
+        $fs->remove($corpusPath.'/'.$entry);
+        $fs->dumpFile($corpusPath.'/'.$fallback, $text);
+        unset($report['sources'][$entry]);
+        $report['sources'][$fallback] = $file;
+        $report['copied'] = array_values(array_diff($report['copied'], [$file]));
+        $report['converted'][] = $file;
+
+        return $fallback;
     }
 
     /**
@@ -793,17 +871,20 @@ class AmoxtliService
      * garde la version précédente, qui quitte l'index au sync suivant.
      *
      * @param CorpusReport $report
+     * @param bool         $retry  retentée au passage suivant, même si $error met la pièce en cause
      *
      * @return bool si l'entrée était encore dans le corpus
      */
-    private function rejectEntry(array &$report, string $corpusPath, string $entry, string $error): bool
+    private function rejectEntry(array &$report, string $corpusPath, string $entry, string $error, bool $retry = false): bool
     {
         $present = is_file($corpusPath.'/'.$entry);
         (new Filesystem())->remove($corpusPath.'/'.$entry);
 
         // "exit status 63" : le convertisseur d'amoxtli (pandoc) a refusé le
-        // fichier ; un délai dépassé ou une erreur d'embeddings ne dit rien de la pièce.
-        $rejected = preg_match('/^exit status (\d+)$/', $error, $match) && $this->rejectsFile((int) $match[1]);
+        // fichier ; CHUNK_PANIC : amoxtli a planté sur son contenu. Un délai
+        // dépassé ou une erreur d'embeddings ne dit rien de la pièce.
+        $rejected = !$retry && ((preg_match('/^exit status (\d+)$/', $error, $match) && $this->rejectsFile((int) $match[1]))
+            || str_starts_with($error, self::CHUNK_PANIC));
 
         $file = $report['sources'][$entry] ?? $entry;
         $report['failed'][] = [

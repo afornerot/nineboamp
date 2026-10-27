@@ -152,10 +152,10 @@ class BoampFinderServiceTest extends TestCase
 
     public function testRunSkipsAlreadyScoredMarketsBeforeFillingSlots(): void
     {
-        $productRepository = $this->createMock(ProductRepository::class);
+        $productRepository = $this->createStub(ProductRepository::class);
         $productRepository->method('findAll')->willReturn([(new Product())->setName('corpus')]);
 
-        $extractor = $this->createMock(ProductMetadataExtractor::class);
+        $extractor = $this->createStub(ProductMetadataExtractor::class);
         $extractor->method('extractMissing')->willReturn(['keywords' => ['logiciel'], 'sectors' => [], 'description' => '']);
 
         $deadline = (new \DateTime('+60 days'))->format(\DATE_ATOM);
@@ -171,7 +171,7 @@ class BoampFinderServiceTest extends TestCase
             return null;
         });
 
-        $marketRepository = $this->createMock(MarketRepository::class);
+        $marketRepository = $this->createStub(MarketRepository::class);
         $marketRepository->method('findScoredIdwebs')->willReturn(array_map($idweb, range(1, 20)));
         $marketRepository->method('findBy')->willReturn([]);
 
@@ -227,7 +227,7 @@ class BoampFinderServiceTest extends TestCase
             'xolo' => ['IA', 'logiciel'],
             'aura' => ['ia', 'Logiciel', 'RGPD'],
         ];
-        $extractor = $this->createMock(ProductMetadataExtractor::class);
+        $extractor = $this->createStub(ProductMetadataExtractor::class);
         $extractor->method('extractMissing')->willReturnCallback(
             static fn (Product $p): array => ['keywords' => $keywordsByProduct[(string) $p->getName()] ?? [], 'sectors' => [], 'description' => ''],
         );
@@ -251,7 +251,7 @@ class BoampFinderServiceTest extends TestCase
 
     public function testRescoreMarketKeepsProductsWhenAgentFails(): void
     {
-        $scoringAgent = $this->createMock(ScoringAgentService::class);
+        $scoringAgent = $this->createStub(ScoringAgentService::class);
         $scoringAgent->method('startScoringJob')->willThrowException(new \RuntimeException('job de scoring non démarré : Connection refused'));
         $em = $this->createMock(EntityManagerInterface::class);
         $em->expects($this->never())->method('remove');
@@ -270,7 +270,7 @@ class BoampFinderServiceTest extends TestCase
 
     public function testRescoreMarketReplacesProductsAndKeepsUserStatus(): void
     {
-        $scoringAgent = $this->createMock(ScoringAgentService::class);
+        $scoringAgent = $this->createStub(ScoringAgentService::class);
         $scoringAgent->method('startScoringJob')->willReturn(['job_id' => 'job-1', 'timeout' => 165]);
         $scoringAgent->method('waitForResult')->willReturn(new AgentJobResult(AgentJobResult::DONE, [
             'score' => 80,
@@ -327,7 +327,7 @@ class BoampFinderServiceTest extends TestCase
         $reflectionProp = new \ReflectionClass($service);
         $emProp = $reflectionProp->getProperty('em');
         $emProp->setAccessible(true);
-        $mockEm = $this->createMock(EntityManagerInterface::class);
+        $mockEm = $this->createStub(EntityManagerInterface::class);
         $emProp->setValue($service, $mockEm);
 
         $reflectionProp = new \ReflectionClass($service);
@@ -383,9 +383,9 @@ class BoampFinderServiceTest extends TestCase
         $old = (new MarketProduct())->setProduct($product)->setScore(30);
         $market->addMarketProduct($old);
 
-        $productRepository = $this->createMock(ProductRepository::class);
+        $productRepository = $this->createStub(ProductRepository::class);
         $productRepository->method('findAll')->willReturn([$product]);
-        $marketProductRepository = $this->createMock(MarketProductRepository::class);
+        $marketProductRepository = $this->createStub(MarketProductRepository::class);
         $marketProductRepository->method('findByMarket')->with(42)->willReturn([$old]);
 
         $service = $this->buildService(

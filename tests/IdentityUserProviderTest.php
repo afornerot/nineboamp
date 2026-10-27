@@ -82,7 +82,7 @@ class IdentityUserProviderTest extends TestCase
 
     private function trackableEm(): EntityManagerInterface
     {
-        $em = $this->createMock(EntityManagerInterface::class);
+        $em = $this->createStub(EntityManagerInterface::class);
         $em->method('persist')->willReturnCallback(function (?object $entity): void {
         });
         $em->method('flush')->willReturnCallback(function (): void {

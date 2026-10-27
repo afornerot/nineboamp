@@ -47,9 +47,8 @@ class OidcStateTest extends TestCase
 
         // Client factice : l'échange de code viendra plus tard (avec le vrai
         // provider). On teste que le state est bien consommé avant cet appel.
-        $oidcClient = $this->createConfiguredMock(OidcClient::class, [
-            'exchangeCode' => [],
-        ]);
+        $oidcClient = $this->createStub(OidcClient::class);
+        $oidcClient->method('exchangeCode')->willReturn([]);
 
         $authenticator = new OidcAuthenticator(
             'OIDC',

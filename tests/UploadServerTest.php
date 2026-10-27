@@ -2,7 +2,7 @@
 
 namespace App\Tests;
 
-use App\Security\FileVoter;
+use App\Security\Voter\FileVoter;
 use Bnine\FilesBundle\Security\AbstractFileVoter;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;

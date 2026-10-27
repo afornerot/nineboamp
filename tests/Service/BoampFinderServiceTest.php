@@ -354,13 +354,13 @@ class BoampFinderServiceTest extends TestCase
         return new BoampFinderService(
             $boampApi ?? $this->createMock(BoampApiService::class),
             $scoringAgent ?? $this->createMock(ScoringAgentService::class),
-            $this->createMock(\App\Service\RocketChatNotifier::class),
+            $this->createStub(\App\Service\RocketChatNotifier::class),
             $productRepository ?? $this->createMock(ProductRepository::class),
             $marketRepository ?? $this->createMock(MarketRepository::class),
             $marketProductRepository ?? $this->createMock(MarketProductRepository::class),
-            $this->createMock(\App\Repository\BoampReportRepository::class),
+            $this->createStub(\App\Repository\BoampReportRepository::class),
             $extractor ?? $this->createMock(ProductMetadataExtractor::class),
-            $this->createMock(\App\Service\PromptLoader::class),
+            $this->createStub(\App\Service\PromptLoader::class),
             $em ?? $this->createMock(EntityManagerInterface::class),
             $logger ?? $this->createMock(LoggerInterface::class),
         );

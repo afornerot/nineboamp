@@ -35,7 +35,7 @@ class ProductMetadataExtractorTest extends TestCase
             ->setDescription('Ma description manuelle')
             ->setFiche('# Fiche');
 
-        $extractor = new ProductMetadataExtractor($ai, $this->createMock(LoggerInterface::class), $this->promptLoaderMock());
+        $extractor = new ProductMetadataExtractor($ai, $this->createStub(LoggerInterface::class), $this->promptLoaderMock());
 
         $result = $extractor->extractMissing($product);
 
@@ -53,7 +53,7 @@ class ProductMetadataExtractorTest extends TestCase
             ->setName('Planigram')
             ->setSectors('');
 
-        $extractor = new ProductMetadataExtractor($ai, $this->createMock(LoggerInterface::class), $this->promptLoaderMock());
+        $extractor = new ProductMetadataExtractor($ai, $this->createStub(LoggerInterface::class), $this->promptLoaderMock());
 
         $result = $extractor->extractMissing($product);
 
@@ -73,7 +73,7 @@ class ProductMetadataExtractorTest extends TestCase
             ->setName('Planigram')
             ->setFiche('# Fiche produit riche');
 
-        $extractor = new ProductMetadataExtractor($ai, $this->createMock(LoggerInterface::class), $this->promptLoaderMock());
+        $extractor = new ProductMetadataExtractor($ai, $this->createStub(LoggerInterface::class), $this->promptLoaderMock());
 
         $result = $extractor->extractMissing($product);
 
@@ -92,7 +92,7 @@ class ProductMetadataExtractorTest extends TestCase
             ->setName('X')
             ->setFiche('contenu');
 
-        $extractor = new ProductMetadataExtractor($ai, $this->createMock(LoggerInterface::class), $this->promptLoaderMock());
+        $extractor = new ProductMetadataExtractor($ai, $this->createStub(LoggerInterface::class), $this->promptLoaderMock());
 
         $result = $extractor->extractMissing($product);
 
@@ -110,7 +110,7 @@ class ProductMetadataExtractorTest extends TestCase
             ->setName('Planigram')
             ->setFiche('contenu');
 
-        $extractor = new ProductMetadataExtractor($ai, $this->createMock(LoggerInterface::class), $this->promptLoaderMock());
+        $extractor = new ProductMetadataExtractor($ai, $this->createStub(LoggerInterface::class), $this->promptLoaderMock());
 
         $result = $extractor->extractMissing($product);
 
@@ -128,7 +128,7 @@ class ProductMetadataExtractorTest extends TestCase
             ->setName('Planigram')
             ->setFiche('contenu');
 
-        $extractor = new ProductMetadataExtractor($ai, $this->createMock(LoggerInterface::class), $this->promptLoaderMock());
+        $extractor = new ProductMetadataExtractor($ai, $this->createStub(LoggerInterface::class), $this->promptLoaderMock());
 
         $result = $extractor->extractMissing($product);
 
@@ -167,7 +167,7 @@ class ProductMetadataExtractorTest extends TestCase
             ->setName('Planigram')
             ->setFiche('contenu');
 
-        $extractor = new ProductMetadataExtractor($ai, $this->createMock(LoggerInterface::class), $this->promptLoaderMock());
+        $extractor = new ProductMetadataExtractor($ai, $this->createStub(LoggerInterface::class), $this->promptLoaderMock());
 
         $result = $extractor->extractMissing($product);
 
@@ -189,7 +189,7 @@ class ProductMetadataExtractorTest extends TestCase
             ->setSectors('')
             ->setFiche('# Fiche');
 
-        $extractor = new ProductMetadataExtractor($ai, $this->createMock(LoggerInterface::class), $this->promptLoaderMock());
+        $extractor = new ProductMetadataExtractor($ai, $this->createStub(LoggerInterface::class), $this->promptLoaderMock());
 
         $result = $extractor->extractMissing($product);
 
@@ -211,7 +211,7 @@ class ProductMetadataExtractorTest extends TestCase
             ->setSectors('Santé')
             ->setFiche('# Fiche');
 
-        $extractor = new ProductMetadataExtractor($ai, $this->createMock(LoggerInterface::class), $this->promptLoaderMock());
+        $extractor = new ProductMetadataExtractor($ai, $this->createStub(LoggerInterface::class), $this->promptLoaderMock());
 
         $result = $extractor->extractMissing($product);
 
@@ -232,7 +232,7 @@ class ProductMetadataExtractorTest extends TestCase
             ->setDescription('Description manuelle')
             ->setFiche('# Fiche');
 
-        $extractor = new ProductMetadataExtractor($ai, $this->createMock(LoggerInterface::class), $this->promptLoaderMock());
+        $extractor = new ProductMetadataExtractor($ai, $this->createStub(LoggerInterface::class), $this->promptLoaderMock());
 
         $result = $extractor->extractMissing($product);
 
@@ -255,7 +255,7 @@ class ProductMetadataExtractorTest extends TestCase
             ->setDescription('')
             ->setFiche('# fiche');
 
-        $extractor = new ProductMetadataExtractor($ai, $this->createMock(LoggerInterface::class), $this->promptLoaderMock());
+        $extractor = new ProductMetadataExtractor($ai, $this->createStub(LoggerInterface::class), $this->promptLoaderMock());
         $result = $extractor->extractMissing($product);
 
         $this->assertSame(['Mot1'], $result['keywords']);
@@ -275,7 +275,7 @@ class ProductMetadataExtractorTest extends TestCase
             ->setDescription('Ma propre description manuelle détaillée')
             ->setFiche('# Fiche');
 
-        $extractor = new ProductMetadataExtractor($ai, $this->createMock(LoggerInterface::class), $this->promptLoaderMock());
+        $extractor = new ProductMetadataExtractor($ai, $this->createStub(LoggerInterface::class), $this->promptLoaderMock());
         $result = $extractor->extractMissing($product);
 
         $this->assertSame('Ma propre description manuelle détaillée', $result['description']);
@@ -296,7 +296,7 @@ class ProductMetadataExtractorTest extends TestCase
             ->setName('P')
             ->setFiche('c');
 
-        $extractor = new ProductMetadataExtractor($ai, $this->createMock(LoggerInterface::class), $this->promptLoaderMock());
+        $extractor = new ProductMetadataExtractor($ai, $this->createStub(LoggerInterface::class), $this->promptLoaderMock());
         $result = $extractor->extractMissing($product);
 
         $this->assertLessThanOrEqual(300, mb_strlen($result['description']));

@@ -126,6 +126,6 @@ class PromptLoaderTest extends TestCase
 
     private function buildLoader(): PromptLoader
     {
-        return new PromptLoader($this->createMock(LoggerInterface::class), $this->tempDir);
+        return new PromptLoader($this->createStub(LoggerInterface::class), $this->tempDir);
     }
 }

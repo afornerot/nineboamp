@@ -59,7 +59,7 @@ class BoampApiServiceTest extends TestCase
             return new MockResponse('{"results":[]}');
         });
 
-        $service = new BoampApiService($client, $this->createMock(LoggerInterface::class));
+        $service = new BoampApiService($client, $this->createStub(LoggerInterface::class));
         $service->searchMarkets($keywords, 100, 'dateparution DESC', offset: $offset, minDeadline: $minDeadline);
 
         parse_str((string) parse_url((string) $url, \PHP_URL_QUERY), $query);

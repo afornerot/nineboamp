@@ -26,10 +26,10 @@ services:
     container_name: nineboamp
     restart: unless-stopped
     image: reg.cadoles.com/envole/nineboamp
-    # UID = utilisateur hôte (accès aux volumes montés), GID = groupe apache (101)
-    # du conteneur : le GID 102 n'existe pas dans l'image et empechait httpd d'écrire
-    # dans /var/log/apache2 -> apache mourait en boucle de redémarrage.
-    user: "${UID:-1000}:${GID:-101}"
+    # L'entrypoint démarre en root pour aligner ./var sur le propriétaire du code
+    # monté, puis abandonne les privilèges (UID hôte, GID 101 = apache) : httpd
+    # garde l'écriture dans /var/log/apache2 et le crontab dans var/log/cron.log.
+    user: "0:0"
     depends_on:
       mariadb:
         condition: service_healthy

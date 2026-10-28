@@ -66,10 +66,10 @@ services:
       DATABASE_URL: "mysql://nineboamp:un_autre_mdp@mariadb:3306/nineboamp"
 ```
 
-> **Note** : le `user: "${UID:-1000}:${GID:-1000}"` est déjà dans le
-> `compose.yaml` de base — le process tourne avec l'UID de l'utilisateur
-> hôte, les volumes montés sont donc lisibles/écritures des deux côtés
-> sans aucun `chmod`.
+> **Note** : `compose.yaml` fait démarrer le container en root (`user: "0:0"`),
+> puis `misc/script/entrypoint.sh` abandonne les privilèges en adoptant l'UID
+> qui possède `src/` sur l'hôte. Les volumes montés sont donc lisibles et
+> inscriptibles des deux côtés, sans aucun `chmod`.
 
 ## 4. Monter les containers
 
@@ -87,20 +87,17 @@ L'application est accessible sur http://localhost:8024
 
 ## Permissions — plateau
 
-Le `compose.yaml` de base gère tout : `user:` aligne le process sur l'UID
-hôte, et les répertoires `uploads/`, `public/uploads/`, `var/` sont
-créés avant le premier `up`. Rien à faire de plus sur la plupart des
-postes Linux (premier user = 1000).
+`misc/script/entrypoint.sh` fait tout, il n'y a rien à régler :
 
-Si votre UID/GID diffère, deux options :
+1. il démarre en root, lit l'UID propriétaire de `/app/src` (le `src/` monté,
+   donc celui de l'utilisateur hôte) ;
+2. il réaligne `var/`, `uploads/` et `public/uploads/` sur cet UID avec le
+   GID 101 (`apache`) ;
+3. il abandonne les privilèges avec `su-exec` avant de lancer l'application.
 
-```bash
-# Option A : variables d'environnement au moment du up
-UID=1015 GID=1015 docker compose up -d
+L'UID n'est volontairement pas lu depuis `${UID}` : bash ne l'exporte pas, donc
+`user: "${UID:-1000}"` retombait toujours sur 1000 et le crontab échouait en
+« Permission denied » dès que l'utilisateur hôte avait un autre UID.
 
-# Option B : plan B sur un montage exotique
-chmod -R 777 ./uploads ./public/uploads
-```
-
-En production, le Dockerfile gère automatiquement les permissions avec
-l'utilisateur `apache`.
+Le réalignement est idempotent : au démarrage suivant les fichiers appartiennent
+déjà au bon compte, `chown` ne réécrit que les métadonnées.

@@ -62,3 +62,14 @@ consommés par deux workers lancés en parallèle des crons :
   en erreur est notée dans `var/log/startup.log`. Le script est copié dans
   l'image : le modifier demande de la reconstruire.
 - Vérifier l'état via `php bin/console messenger:stats`.
+
+## Permissions des volumes
+
+Le container démarre en root (`user: "0:0"` dans `compose.yaml`) puis
+`misc/script/entrypoint.sh` abandonne les privilèges : il aligne `var/` sur le
+propriétaire de `src/` (l'utilisateur hôte, qui possède les bind mounts) et
+relance le CMD avec cet UID et le GID 101 (`apache`). Déduire l'UID du montage
+est nécessaire : `${UID}` n'est pas exporté par bash, donc l'ancienne
+interpolation `user: "${UID:-1000}:${GID:-101}"` retombait sur 1000 et chaque
+`>> var/log/cron.log` échouait en « Permission denied » (`app:cron` sortait en
+code 1 chaque minute).

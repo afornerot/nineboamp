@@ -28,7 +28,11 @@ COPY --chown=apache:apache . .
 # Outils du pipeline amoxtli (pdftotext, pandoc, .doc → texte via catdoc ou
 # antiword, xlsx/xls → csv via openpyxl/xlrd)
 USER root
-RUN apk add --no-cache poppler-utils pandoc antiword python3 py3-pip build-base && pip3 install --no-cache-dir --break-system-packages openpyxl xlrd
+# su-exec : abandon des privilèges dans l'entrypoint (setpriv de BusyBox n'a pas
+# --reuid) ; outils du pipeline amoxtli (pdftotext, pandoc, .doc → texte via
+# antiword, xlsx/xls → csv via openpyxl/xlrd).
+RUN apk add --no-cache su-exec poppler-utils pandoc antiword python3 py3-pip build-base \
+    && pip3 install --no-cache-dir --break-system-packages openpyxl xlrd
 USER apache
 
 RUN composer install --no-interaction --no-scripts
@@ -41,4 +45,5 @@ RUN mkdir -p /app/uploads \
     && cp -rf /app/public/medias/logo /app/public/uploads/logo \
     && cp -rf /app/public/medias/avatar /app/public/uploads/avatar
 
+ENTRYPOINT ["/app/misc/script/entrypoint.sh"]
 CMD ["/app/misc/script/reconfigure.sh","/etc/apache2/apache2.sh"]

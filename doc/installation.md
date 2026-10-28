@@ -91,6 +91,10 @@ docker compose up -d --build
 > `root:root` — ce qui casse les permissions. Créés à l'avance, le `chown`
 > ci-dessus les aligne sur le container.
 
+> **L'ordre des trois commandes est important** : `mkdir` crée les répertoires
+> avec votre UID, `chown` les transfère à `apache`, `up` démarre le container.
+> Un `up` lancé avant le `chown` s'arrête immédiatement (voir « Permissions »).
+
 L'application est accessible sur http://localhost:8024
 
 ## Permissions
@@ -105,7 +109,22 @@ une action manuelle est nécessaire :
 sudo chown -R 100:101 var uploads public/uploads
 ```
 
-Ce cas survient quand la stack a été démarrée avec une autre propriété sur les
-volumes (ancienne configuration, ou répertoires créés par Docker en `root`) :
-les fichiers créés alors appartiennent à cet UID, y compris les workspaces
-amoxtli en `750` que le nouveau process ne peut plus lire.
+Le `-R` est indispensable : les workspaces amoxtli (`uploads/amoxtli/<id>/`) sont
+en `750` et leurs fichiers appartiennent au compte qui les a créés. Sans le
+récursif, l'onglet « Documents indexés » reste en « permission denied ».
+
+### Mise à jour d'une installation existante
+
+Les versions antérieures à `35077cd` démarraient le container avec l'UID de
+l'utilisateur hôte (`LOCAL_UID`) au lieu de `apache`. Les fichiers créés alors
+appartiennent à cet UID hôte : après un `git pull`, il faut donc passer le
+`chown` ci-dessus **avant** de relancer le container, sinon il refuse de
+démarrer :
+
+```bash
+git pull
+sudo chown -R 100:101 var uploads public/uploads
+docker compose up -d --build
+```
+
+Le `chown` est sans effet sur une installation fraîche : il est idempotent.

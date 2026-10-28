@@ -26,13 +26,11 @@ services:
     container_name: nineboamp
     restart: unless-stopped
     image: reg.cadoles.com/envole/nineboamp
-    # Le container tourne SANS privilèges, avec l'UID de l'utilisateur hôte
-    # (bind mounts) et le GID 101 (apache) : httpd écrit dans /var/log/apache2.
-    # `${UID}` ne peut pas servir ici : bash ne l'exporte pas, l'interpolation
-    # retombait toujours sur 1000. `misc/script/up.sh` renseigne LOCAL_UID avec
-    # `id -u` ; sans lui, le défaut s'applique et l'entrypoint refuse de démarrer
-    # si les volumes appartiennent à un autre compte, en affichant le chown.
-    user: "${LOCAL_UID:-1000}:101"
+    # Le container tourne SANS privilèges, avec l'utilisateur `apache` de
+    # l'image (UID 100, GID 101) : httpd écrit ainsi dans /var/log/apache2 et
+    # n'a besoin d'aucun privilège. Les répertoires montés depuis l'hôte
+    # doivent appartenir à ce même UID — voir misc/script/entrypoint.sh, qui
+    # refuse de démarrer et affiche la commande `chown` à passer sur l'hôte.
     depends_on:
       mariadb:
         condition: service_healthy

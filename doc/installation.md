@@ -66,46 +66,46 @@ services:
       DATABASE_URL: "mysql://nineboamp:un_autre_mdp@mariadb:3306/nineboamp"
 ```
 
-> **Note** : le container tourne sans privilèges, avec l'UID de l'utilisateur
-> hôte (`misc/script/up.sh` le transmet dans `LOCAL_UID`) et le GID 101
-> (`apache`). `misc/script/entrypoint.sh` vérifie au démarrage que les volumes
-> montés appartiennent bien à cet UID, et s'arrête sinon en affichant la commande
-> `chown` à lancer.
+> **Note** : le container tourne sans privilèges, avec l'utilisateur
+> `apache` de l'image (UID 100, GID 101). `misc/script/entrypoint.sh` vérifie
+> au démarrage que les volumes montés lui appartiennent, et s'arrête sinon en
+> affichant la commande `chown` à lancer.
 
 ## 4. Monter les containers
 
 ```bash
 mkdir -p var uploads public/uploads
-./misc/script/up.sh up -d --build
+sudo chown -R 100:101 var uploads public/uploads
+docker compose up -d --build
 ```
 
-> **Pourquoi `up.sh` et pas `docker compose` directement** : `compose.yaml`
-> exige `LOCAL_UID`, que le script remplit avec `id -u`. On ne peut pas lire
-> `${UID}` dans le compose : bash ne l'exporte pas, donc la valeur retombait sur
-> un défaut (1000) et le container tournait avec un autre UID que les volumes —
-> `app:cron` échouait alors en « Permission denied » et amoxtli ne pouvait plus
-> lire les workspaces de l'onglet « Documents indexés ».
+> **Pourquoi le `chown`** : le container tourne en UID 100 (`apache`), comme
+> l'image le déclare. Les répertoires montés depuis l'hôte doivent lui
+> appartenir, sinon chaque écriture échoue en « Permission denied » : `app:cron`
+> sort en code 1 sur `var/log/cron.log` et amoxtli ne peut plus lire les
+> workspaces de l'onglet « Documents indexés ». La commande est identique sur
+> toutes les machines, l'UID du container ne dépendant pas de l'hôte.
 
 > **Pourquoi `mkdir` avant le premier `up`** : si un répertoire monté
 > n'existe pas encore sur l'hôte, Docker le crée en propriétaire
-> `root:root` — ce qui casse les permissions. Créés à l'avance, ils
-> appartiennent à votre utilisateur et tout fonctionne.
+> `root:root` — ce qui casse les permissions. Créés à l'avance, le `chown`
+> ci-dessus les aligne sur le container.
 
 L'application est accessible sur http://localhost:8024
 
 ## Permissions
 
 Le container ne prend jamais de privilèges. `misc/script/entrypoint.sh` vérifie
-seulement que `var/`, `uploads/` et `public/uploads/` sont inscriptibles par
-l'UID du process ; sinon il s'arrête avant de lancer quoi que ce soit, en
-affichant la commande à passer sur l'hôte. C'est le seul cas où une action
-manuelle est nécessaire :
+seulement que `var/`, `var/log`, `uploads/` et `public/uploads/` sont
+inscriptibles par l'UID du process ; sinon il s'arrête avant de lancer quoi que
+ce soit, en affichant la commande à passer sur l'hôte. C'est le seul cas où
+une action manuelle est nécessaire :
 
 ```bash
-sudo chown -R "$(id -u)":101 var uploads public/uploads
+sudo chown -R 100:101 var uploads public/uploads
 ```
 
-Ce cas survient quand la stack a été démarrée par un container tournant avec un
-autre UID (ancienne configuration, ou `docker compose` lancé sans `up.sh`) : les
-fichiers créés alors appartiennent à cet UID, y compris les workspaces amoxtli
-en `750` que le nouveau process ne peut plus lire.
+Ce cas survient quand la stack a été démarrée avec une autre propriété sur les
+volumes (ancienne configuration, ou répertoires créés par Docker en `root`) :
+les fichiers créés alors appartiennent à cet UID, y compris les workspaces
+amoxtli en `750` que le nouveau process ne peut plus lire.

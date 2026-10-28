@@ -17,7 +17,7 @@ class ProductMetadataExtractorTest extends TestCase
      */
     private function promptLoaderMock(): PromptLoader
     {
-        $loader = $this->promptLoaderMock();
+        $loader = $this->createStub(PromptLoader::class);
         $loader->method('renderSystem')->willReturn('Prompt de test.');
 
         return $loader;

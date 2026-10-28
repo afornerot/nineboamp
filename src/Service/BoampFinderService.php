@@ -39,7 +39,6 @@ class BoampFinderService
         private MarketProductRepository $marketProductRepository,
         private BoampReportRepository $reportRepository,
         private ProductMetadataExtractor $metadataExtractor,
-        private PromptLoader $promptLoader,
         private EntityManagerInterface $em,
         private LoggerInterface $logger,
     ) {
@@ -427,11 +426,11 @@ class BoampFinderService
         $description = $this->extractDescription($details);
         $deadlineRaw = $details['datelimitereponse'] ?? null;
         $amount = $this->formatAmount($details);
-        $url = $market->getUrl() ?? "https://www.boamp.fr/pages/avis/?q=idweb:{$market->getIdweb()}";
 
         $productsData = [];
         foreach ($products as $p) {
             $productsData[] = [
+                'id' => $p->getId(),
                 'name' => $p->getName() ?? '',
                 'description' => $p->getDescription() ?? '',
                 'keywords' => $p->getKeywords() ?? '',
@@ -440,11 +439,11 @@ class BoampFinderService
         }
 
         $this->em->flush();
-        $marketId = $market->getId();
 
         // Lève avec sa raison si l'agent n'a pas créé le job : l'appelant l'affiche.
         $started = $this->scoringAgent->startScoringJob(
-            $marketId,
+            $market->getId(),
+            $market->getIdweb() ?? '',
             $title ?? '',
             $buyer,
             $description,
@@ -467,274 +466,104 @@ class BoampFinderService
             // API en échec, délai dépassé, job perdu : l'appelant l'affiche avec sa raison.
             throw new \RuntimeException(sprintf('%s (job %s)', $job->error, $jobId));
         }
-        $result = $job->result;
 
         $market->setDescription($description);
         $market->setDeadline($deadlineRaw ? new \DateTime($deadlineRaw) : null);
         $market->setAmount($amount);
-        $market->setScore($result['score'] ?? 0);
-        $market->setPriority($result['priority'] ?? 'C');
-        $market->setExplanation($result['explanation'] ?? null);
         $market->setStatus(Market::STATUS_QUALIFIED);
 
-        $marketProducts = [];
-        foreach ($result['products'] ?? [] as $p) {
+        return [$market, $this->applyScoringResult($market, $job->result, $products)];
+    }
+
+    /**
+     * Applique un résultat de scoring : score/priorité/explication du marché et
+     * lignes produit (les lignes précédentes du marché sont remplacées).
+     *
+     * @param array<string, mixed> $result    payload result du job score
+     * @param Product[]|null       $catalogue catalogue de résolution (tous les produits par défaut)
+     *
+     * @return MarketProduct[]
+     *
+     * @throws \RuntimeException si aucun produit du catalogue n'est fourni ni disponible
+     */
+    public function applyScoringResult(Market $market, array $result, ?array $catalogue = null): array
+    {
+        $catalogue ??= $this->productRepository->findAll();
+        if (0 === count($catalogue)) {
+            throw new \RuntimeException('Aucun produit en base.');
+        }
+
+        $market->setScore(isset($result['score']) && is_numeric($result['score']) ? (int) $result['score'] : 0);
+        $market->setPriority(isset($result['priority']) && is_string($result['priority']) ? $result['priority'] : 'C');
+        $market->setExplanation(isset($result['explanation']) && is_string($result['explanation']) ? $result['explanation'] : null);
+
+        $existing = null !== $market->getId() ? $this->marketProductRepository->findByMarket($market->getId()) : [];
+
+        $created = [];
+        foreach ($result['products'] ?? [] as $payload) {
+            if (!is_array($payload)) {
+                continue;
+            }
+            $product = $this->findProduct($catalogue, $payload);
+            if (null === $product) {
+                continue;
+            }
+
             $mp = new MarketProduct();
             $mp->setMarket($market);
-            $productEntity = $this->findProductByName($products, $p['name'] ?? '');
-            if ($productEntity) {
-                $mp->setProduct($productEntity);
-            }
-            $mp->setScore($p['score'] ?? null);
-            $mp->setPriority($p['priority'] ?? null);
-            $mp->setRelevance($p['relevance'] ?? null);
-            $mp->setScoreDetails($p['scoreDetails'] ?? null);
+            $mp->setProduct($product);
+            $mp->setScore(isset($payload['score']) && is_numeric($payload['score']) ? (int) $payload['score'] : null);
+            $mp->setPriority(isset($payload['priority']) ? (string) $payload['priority'] : null);
+            $mp->setRelevance(isset($payload['relevance']) ? (string) $payload['relevance'] : null);
+            $mp->setScoreDetails(isset($payload['scoreDetails']) ? (string) $payload['scoreDetails'] : null);
             $market->addMarketProduct($mp);
-            $marketProducts[] = $mp;
+            $this->em->persist($mp);
+            $created[] = $mp;
         }
 
-        return [$market, $marketProducts];
+        foreach ($existing as $mp) {
+            $market->removeMarketProduct($mp);
+            $this->em->remove($mp);
+        }
+
+        $this->em->persist($market);
+        $this->em->flush();
+
+        return $created;
     }
 
     /**
-     * @param Product[] $products
+     * Résout un produit du scoring par son ID, à défaut par son nom exact.
+     *
+     * @param Product[]            $catalogue
+     * @param array<string, mixed> $payload entrée products[] du scoring
      */
-    private function findProductByName(array $products, string $name): ?Product
+    private function findProduct(array $catalogue, array $payload): ?Product
     {
-        $name = mb_strtolower(trim($name));
-        foreach ($products as $p) {
-            if (mb_strtolower(trim($p->getName() ?? '')) === $name) {
-                return $p;
-            }
-        }
-
-        return $products[0] ?? null;
-    }
-
-    private function getScoringRole(): string
-    {
-        $filePrompt = $this->promptLoader->renderSystem('scoring.role');
-        
-        if ('' !== $filePrompt) {
-            return $filePrompt;
-        }
-
-        throw new \RuntimeException('Prompt scoring.role.md not found in src/DataFixtures/data/scoring/');
-    }
-
-    /**
-     * @param Product[]            $products
-     * @param array<string, mixed> $details
-     */
-    private function buildScoringPrompt(array $products, string $idweb, string $title, string $buyer, string $description, string $amount, ?string $deadline, array $details): string
-    {
-        $description = $this->stringifyValue($description);
-
-        $catalogue = '';
-        foreach ($products as $p) {
-            $short = $p->getDescription() ?: ($p->getName() ?? '');
-            $keywords = $p->getKeywords() ?: '';
-            $sectors = $p->getSectors() ?: '';
-            $catalogue .= "- **{$p->getName()}**\n  Description: {$short}\n  Mots-clés: {$keywords}\n  Secteurs: {$sectors}\n\n";
-        }
-
-        $rawText = '';
-        foreach ($details as $k => $v) {
-            if (is_string($v) && 'donnees' !== $k && 'gestion' !== $k && strlen($v) < 2000) {
-                $rawText .= "{$k}: {$v}\n";
-            }
-        }
-
-        $donnees = $this->parseDonnees($details);
-        if ([] !== $donnees) {
-            $objetComplet = $donnees['FNSimple']['initial']['natureMarche']['description']
-                ?? $donnees['EFORMS']['ContractNotice']['cac:ProcurementProject']['cbc:Description']['#text']
-                ?? $donnees['OBJET']['OBJET_COMPLET']
-                ?? $donnees['OBJET']['description']
-                ?? '';
-            if ('' !== trim($objetComplet)) {
-                $rawText .= "Objet complet: {$objetComplet}\n";
-            }
-            $intitule = $donnees['FNSimple']['initial']['natureMarche']['intitule']
-                ?? $donnees['EFORMS']['ContractNotice']['cac:ProcurementProject']['cbc:Name']['#text']
-                ?? '';
-            if ('' !== trim($intitule)) {
-                $rawText .= "Intitulé: {$intitule}\n";
-            }
-            $criteres = $donnees['FNSimple']['initial']['procedure']['criteresAttrib']
-                ?? $donnees['PROCEDURE']['CRITERES_ATTRIBUTION']['CRITERES_LIBRE']
-                ?? '';
-            if ('' !== trim($criteres)) {
-                $rawText .= "Critères d'attribution: {$criteres}\n";
-            }
-            $capTech = $donnees['FNSimple']['initial']['procedure']['capaciteTech']
-                ?? $donnees['PROCEDURE']['CONDITION_PARTICIPATION']['CAP_TECH']
-                ?? '';
-            if ('' !== trim($capTech)) {
-                $rawText .= "Capacité technique: {$capTech}\n";
-            }
-            $lieu = $donnees['FNSimple']['initial']['natureMarche']['lieuExecution'] ?? '';
-            if ('' !== trim($lieu)) {
-                $rawText .= "Lieu d'exécution: {$lieu}\n";
-            }
-            $duree = $donnees['FNSimple']['initial']['natureMarche']['dureeMois'] ?? '';
-            if ('' !== trim($duree)) {
-                $rawText .= "Durée (mois): {$duree}\n";
-            }
-            $valeur = $donnees['FNSimple']['initial']['natureMarche']['valeurEstimee']['valeur'] ?? '';
-            if ('' !== trim($valeur)) {
-                $rawText .= "Valeur estimée: {$valeur} EUR\n";
-            }
-
-            if (isset($donnees['EFORMS']['ContractNotice']['cac:ProcurementProjectLot'])) {
-                $lots = $donnees['EFORMS']['ContractNotice']['cac:ProcurementProjectLot'];
-                if (is_array($lots)) {
-                    foreach ($lots as $i => $lot) {
-                        $lotName = $lot['cac:ProcurementProject']['cbc:Name']['#text'] ?? '';
-                        $lotDesc = $lot['cac:ProcurementProject']['cbc:Description']['#text'] ?? '';
-                        if ('' !== trim($lotName) || '' !== trim($lotDesc)) {
-                            $rawText .= "Lot ".($i + 1).": {$lotName}";
-                            if ('' !== trim($lotDesc)) {
-                                $rawText .= " — {$lotDesc}";
-                            }
-                            $rawText .= "\n";
-                        }
-                    }
+        $id = isset($payload['id']) && is_numeric($payload['id']) ? (int) $payload['id'] : null;
+        if (null !== $id) {
+            foreach ($catalogue as $product) {
+                if ($product->getId() === $id) {
+                    return $product;
                 }
             }
         }
 
-        $rendered = $this->promptLoader->renderUser('scoring.user', [
-            'idweb' => $idweb,
-            'title' => $title,
-            'buyer' => $buyer,
-            'description' => $description,
-            'amount' => $amount,
-            'deadline' => (string) ($deadline ?? ''),
-            'rawText' => $rawText,
-            'catalogue' => $catalogue,
+        $name = mb_strtolower(trim((string) ($payload['name'] ?? '')));
+        if ('' !== $name) {
+            foreach ($catalogue as $product) {
+                if (mb_strtolower(trim($product->getName() ?? '')) === $name) {
+                    return $product;
+                }
+            }
+        }
+
+        $this->logger->warning('BoampFinderService: produit du scoring introuvable, ligne ignorée', [
+            'id' => $payload['id'] ?? null,
+            'name' => $payload['name'] ?? null,
         ]);
 
-        if ('' !== $rendered) {
-            return $rendered;
-        }
-
-        return $this->buildScoringPromptFallback($idweb, $title, $buyer, $description, $amount, (string) ($deadline ?? ''), $rawText, $catalogue);
-    }
-
-    /**
-     * Fallback dur inline si le fichier prompt manque. Reproduit l'ancien prompt.
-     */
-    private function buildScoringPromptFallback(
-        string $idweb,
-        string $title,
-        string $buyer,
-        string $description,
-        string $amount,
-        string $deadline,
-        string $rawText,
-        string $catalogue,
-    ): string {
-        return "Voici le marché à scorer :\n\n"
-            ."IDWEB: {$idweb}\n"
-            ."Titre: {$title}\n"
-            ."Acheteur: {$buyer}\n"
-            ."Description: {$description}\n"
-            ."Montant: {$amount}\n"
-            ."Date limite: {$deadline}\n\n"
-            ."Données brutes BOAMP:\n{$rawText}\n\n"
-            ."Catalogue produits de l'entreprise:\n{$catalogue}\n\n"
-            ."Donne-moi uniquement un JSON sans aucun texte avant ou après, avec ce format exact :\n"
-            ."{\n"
-            .'  "score": <note 0-100>,'."\n"
-            .'  "priority": "<A si score>=80, B si >=60, C sinon>",'."\n"
-            ."  \"products\": [\n"
-            ."    {\n"
-            .'      "name": "<nom du produit>",'."\n"
-            .'      "score": <note 0-100>,'."\n"
-            .'      "priority": "<A/B/C>",'."\n"
-            .'      "relevance": "<2-3 phrases d\'explication>",'."\n"
-            .'      "scoreDetails": "<détail des sous-scores: fonctionnel/40, metier/20, technique/20, commercial/10, complexite/10>"'."\n"
-            ."    }\n"
-            ."  ]\n"
-            ."}\n\n"
-            ."Règles : score global = moyenne pondérée des produits. Cite des éléments factuels du marché et des fiches. Si un produit ne matche pas, score=0. Information non disponible = neutre.";
-    }
-
-    /**
-     * @return array<string, mixed>|null
-     */
-    private function parseScoringResponse(string $response): ?array
-    {
-        $json = trim($response);
-
-        $firstBrace = strpos($json, '{');
-        $lastBrace = strrpos($json, '}');
-
-        if (false === $firstBrace || false === $lastBrace || $lastBrace <= $firstBrace) {
-            return null;
-        }
-
-        $json = substr($json, $firstBrace, $lastBrace - $firstBrace + 1);
-
-        try {
-            $data = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            return null;
-        }
-
-        if (!isset($data['score'], $data['priority'], $data['products'])) {
-            return null;
-        }
-
-        $data['score'] = max(0, min(100, (int) ($data['score'] ?? 0)));
-        $data['priority'] = strtoupper(substr($data['priority'], 0, 1));
-        if (!in_array($data['priority'], ['A', 'B', 'C'], true)) {
-            $data['priority'] = 'C';
-        }
-
-        foreach ($data['products'] as &$p) {
-            $p['score'] = max(0, min(100, (int) ($p['score'] ?? 0)));
-            $p['priority'] = strtoupper(substr((string) ($p['priority'] ?? 'C'), 0, 1));
-            if (!in_array($p['priority'], ['A', 'B', 'C'], true)) {
-                $p['priority'] = 'C';
-            }
-        }
-
-        return $data;
-    }
-
-    /**
-     * Recalcule le score global : meilleur score produit + bonus multi-produits.
-     *
-     * @param array<string, mixed> $parsed
-     */
-    private function recalculateGlobalScore(array &$parsed): void
-    {
-        $scores = array_column($parsed['products'], 'score');
-        if ([] === $scores) {
-            return;
-        }
-
-        rsort($scores);
-
-        $base = $scores[0];
-        $bonus = 0;
-        for ($i = 1, $count = count($scores); $i < $count; ++$i) {
-            if ($scores[$i] >= 50) {
-                $bonus += ($scores[$i] - 50) * 0.15;
-            }
-        }
-
-        $parsed['score'] = min(100, (int) round($base + $bonus));
-
-        if ($parsed['score'] >= 80) {
-            $parsed['priority'] = 'A';
-        } elseif ($parsed['score'] >= 60) {
-            $parsed['priority'] = 'B';
-        } else {
-            $parsed['priority'] = 'C';
-        }
+        return null;
     }
 
     /**
@@ -896,30 +725,20 @@ class BoampFinderService
         }
 
         $status = $market->getStatus();
-        $existing = $this->marketProductRepository->findByMarket($market->getId());
 
         $scored = $this->scoreAndQualify($market, $details, $products);
         if (null === $scored) {
             throw new \RuntimeException('Le scoring IA n\'a pas retourné de résultat exploitable.');
         }
 
-        [$market, $marketProducts] = $scored;
+        [$market] = $scored;
 
-        // Retirés seulement une fois le nouveau scoring obtenu : un agent indisponible
-        // laisse le marché tel qu'il était.
-        foreach ($existing as $mp) {
-            $market->removeMarketProduct($mp);
-            $this->em->remove($mp);
-        }
         // Le statut posé par l'utilisateur (go, nogo, répondu…) survit à la requalification.
         if (Market::STATUS_DETECTED !== $status) {
             $market->setStatus($status);
         }
 
         $this->em->persist($market);
-        foreach ($marketProducts as $mp) {
-            $this->em->persist($mp);
-        }
         $this->em->flush();
 
         return $market;

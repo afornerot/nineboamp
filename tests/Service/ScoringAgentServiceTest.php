@@ -17,14 +17,14 @@ class ScoringAgentServiceTest extends TestCase
             $this->assertSame('POST', $method);
             $this->assertSame('http://127.0.0.1:8000/score', $url);
             $this->assertSame(
-                ['market_id' => 1, 'title' => 't', 'buyer' => 'b', 'description' => 'd', 'amount' => '1000', 'deadline' => null, 'products' => []],
+                ['market_id' => 1, 'idweb' => '26-1', 'title' => 't', 'buyer' => 'b', 'description' => 'd', 'amount' => '1000', 'deadline' => null, 'products' => []],
                 json_decode($options['body'], true),
             );
 
             return new MockResponse('{"job_id":"job-1","timeout":165}');
         });
 
-        $started = $this->scoringAgent($client)->startScoringJob(1, 't', 'b', 'd', '1000', null, []);
+        $started = $this->scoringAgent($client)->startScoringJob(1, '26-1', 't', 'b', 'd', '1000', null, []);
 
         $this->assertSame(['job_id' => 'job-1', 'timeout' => 165], $started);
     }
@@ -36,7 +36,7 @@ class ScoringAgentServiceTest extends TestCase
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('job de scoring refusé par l\'agent (HTTP 500) : impossible de créer le job');
 
-        $this->scoringAgent($client)->startScoringJob(1, 't', 'b', 'd', '1000', null, []);
+        $this->scoringAgent($client)->startScoringJob(1, '26-1', 't', 'b', 'd', '1000', null, []);
     }
 
     private function scoringAgent(MockHttpClient $client): ScoringAgentService

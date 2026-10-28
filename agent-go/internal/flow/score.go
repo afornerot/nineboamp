@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/bornholm/genai/llm"
@@ -60,28 +61,23 @@ func (s *Service) Score(ctx context.Context, req ScoreRequest) (status string, r
 	}
 }
 
-// buildScoreUserPrompt reconstruit le prompt utilisateur du scoring,
-// à l'identique de process_score (agent/main.py).
+// buildScoreUserPrompt rend le prompt utilisateur du scoring : le template
+// scoring.user.md porte tous les placeholders (marché + catalogue).
 func buildScoreUserPrompt(template string, req ScoreRequest) string {
-	deadline := orDefault(req.Deadline, "Non précisée")
-
 	description := "Non disponible"
 	if req.Description != "" {
 		description = truncateRunes(req.Description, 2000)
 	}
 
-	products := formatProducts(req.Products, "Aucun produit disponible.")
-
-	return template +
-		"\n\n## Marché à évaluer\n\n" +
-		"- **Titre**: " + req.Title + "\n" +
-		"- **Acheteur**: " + req.Buyer + "\n" +
-		"- **Montant**: " + req.Amount + "\n" +
-		"- **Deadline**: " + deadline + "\n" +
-		"- **Description**: " + description + "\n\n" +
-		"## Produits Cadoles disponibles\n\n" +
-		products +
-		"\n"
+	return strings.NewReplacer(
+		"{{idweb}}", req.Idweb,
+		"{{title}}", req.Title,
+		"{{buyer}}", orDefault(req.Buyer, "Information non disponible"),
+		"{{description}}", description,
+		"{{amount}}", orDefault(req.Amount, "Information non disponible"),
+		"{{deadline}}", orDefault(req.Deadline, "Non précisée"),
+		"{{catalogue}}", formatProducts(req.Products, "Aucun produit disponible."),
+	).Replace(template)
 }
 
 // parsedScore est le résultat de l'extraction JSON du scoring.
@@ -137,20 +133,75 @@ func parseScoreJSON(content string) (parsedScore, error) {
 	}
 	if v, ok := obj["explanation"]; ok {
 		if str, ok := v.(string); ok {
-			out.Explanation = str
+			out.Explanation = truncateSentence(str, maxExplanationRunes)
 		}
 	}
 	if v, ok := obj["products"]; ok {
 		if arr, ok := v.([]any); ok {
 			for _, item := range arr {
 				if m, ok := item.(map[string]any); ok {
-					out.Products = append(out.Products, m)
+					out.Products = append(out.Products, normalizeScoredProduct(m))
 				}
 			}
 		}
 	}
 
 	return out, nil
+}
+
+// Bornes des champs texte du scoring. Le modèle déverse régulièrement son
+// analyse dans "scoreDetails" (10 993 caractères observés sur le marché 3655) :
+// le prompt demande des longueurs courtes, ces bornes les garantissent.
+const (
+	maxExplanationRunes  = 400
+	maxRelevanceRunes    = 300
+	maxScoreDetailsRunes = 200
+)
+
+// truncateSentence coupe à la dernière fin de phrase avant limit, pour ne pas
+// laisser une explication tronquée en pleine phrase ; sans ponctuation
+// exploitable, elle retombe sur la coupe sèche.
+func truncateSentence(s string, limit int) string {
+	s = strings.TrimSpace(s)
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+
+	for i := limit - 1; i > limit/2; i-- {
+		if runes[i] == '.' || runes[i] == '!' || runes[i] == '?' {
+			return string(runes[:i+1])
+		}
+	}
+
+	return string(runes[:limit])
+}
+
+// normalizeScoredProduct borne les champs libres d'un produit et retire le
+// texte des produits non pertinents, qui n'apportent rien à la fiche.
+func normalizeScoredProduct(p map[string]any) map[string]any {
+	if score, ok := atoiFlexible(p["score"]); ok && score == 0 {
+		return map[string]any{
+			"id":       p["id"],
+			"name":     p["name"],
+			"score":    score,
+			"priority": "C",
+		}
+	}
+
+	out := make(map[string]any, len(p))
+	for k, v := range p {
+		out[k] = v
+	}
+	if str, ok := out["relevance"].(string); ok {
+		out["relevance"] = truncateSentence(str, maxRelevanceRunes)
+	}
+	// Les sous-scores forment une ligne de chiffres : une coupe sèche suffit.
+	if str, ok := out["scoreDetails"].(string); ok {
+		out["scoreDetails"] = truncateRunes(strings.TrimSpace(str), maxScoreDetailsRunes)
+	}
+
+	return out
 }
 
 // scoreResponseSchema décrit le JSON attendu pour le scoring (détail des
@@ -170,19 +221,27 @@ func scoreResponseSchema() llm.ResponseSchema {
 			},
 			"explanation": map[string]any{
 				"type":        "string",
-				"description": "3-5 phrases expliquant le score global, en citant des éléments factuels du marché",
+				"description": "3 phrases maximum (400 caractères) : justification du score global, avec des éléments factuels du marché",
 			},
 			"products": map[string]any{
 				"type": "array",
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"name":         map[string]any{"type": "string"},
-						"score":        map[string]any{"type": "integer"},
-						"priority":     map[string]any{"type": "string"},
-						"relevance":    map[string]any{"type": "string"},
-						"scoreDetails": map[string]any{"type": "string"},
+						"id":       map[string]any{"type": "integer", "description": "ID du produit repris tel quel du catalogue"},
+						"name":     map[string]any{"type": "string", "description": "Nom du produit repris tel quel du catalogue"},
+						"score":    map[string]any{"type": "integer", "description": "Note 0-100 pour ce produit"},
+						"priority": map[string]any{"type": "string", "description": "A si score>=80, B si >=60, C sinon"},
+						"relevance": map[string]any{
+							"type":        "string",
+							"description": "2 phrases maximum (300 caractères) : pourquoi ce produit correspond (ou non) au marché",
+						},
+						"scoreDetails": map[string]any{
+							"type":        "string",
+							"description": "Une seule ligne de cinq sous-scores, ex: fonctionnel 40/40, métier 19/20, technique 18/20, commercial 8/10, complexité 9/10 — sans commentaire",
+						},
 					},
+					"required": []string{"id", "name", "score", "priority", "relevance"},
 				},
 			},
 		},

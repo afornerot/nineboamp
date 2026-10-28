@@ -241,12 +241,56 @@ class BoampFinderServiceTest extends TestCase
         $this->assertSame(['IA', 'intelligence artificielle', 'logiciel', 'RGPD'], $keywords);
     }
 
-    public function testFindProductByNameIgnoresCase(): void
+    public function testApplyScoringResultResolvesProductById(): void
     {
-        $corpus = (new Product())->setName('corpus');
-        $xolo = (new Product())->setName('xolo');
+        [$market, $created] = $this->applyScoringResult([
+            'score' => 94,
+            'priority' => 'A',
+            'explanation' => 'Formation IA générative.',
+            'products' => [[
+                'id' => 83,
+                'name' => 'Formation aux outils libres et numériques',
+                'score' => 94,
+                'priority' => 'A',
+                'relevance' => 'Correspondance directe.',
+            ]],
+        ]);
 
-        $this->assertSame($xolo, $this->callPrivate($this->buildService(), 'findProductByName', [$corpus, $xolo], 'Xolo'));
+        $this->assertCount(1, $created);
+        $this->assertSame('formation-ia', $created[0]->getProduct()?->getName());
+        $this->assertSame(94, $created[0]->getScore());
+        $this->assertSame(94, $market->getScore());
+        $this->assertSame('A', $market->getPriority());
+    }
+
+    public function testApplyScoringResultFallsBackToName(): void
+    {
+        [, $created] = $this->applyScoringResult([
+            'score' => 70,
+            'priority' => 'B',
+            'products' => [['name' => 'Formation-IA', 'score' => 70]],
+        ]);
+
+        $this->assertCount(1, $created);
+        $this->assertSame('formation-ia', $created[0]->getProduct()?->getName());
+    }
+
+    public function testApplyScoringResultSkipsUnknownProduct(): void
+    {
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects($this->once())->method('warning')->with(
+            $this->stringContains('produit du scoring introuvable'),
+            $this->callback(static fn (array $ctx): bool => 999 === $ctx['id'] && 'inexistant' === $ctx['name']),
+        );
+
+        [$market, $created] = $this->applyScoringResult([
+            'score' => 50,
+            'priority' => 'C',
+            'products' => [['id' => 999, 'name' => 'inexistant', 'score' => 50]],
+        ], $logger);
+
+        $this->assertSame([], $created);
+        $this->assertCount(0, $market->getMarketProducts());
     }
 
     public function testRescoreMarketKeepsProductsWhenAgentFails(): void
@@ -360,7 +404,6 @@ class BoampFinderServiceTest extends TestCase
             $marketProductRepository ?? $this->createMock(MarketProductRepository::class),
             $this->createStub(\App\Repository\BoampReportRepository::class),
             $extractor ?? $this->createMock(ProductMetadataExtractor::class),
-            $this->createStub(\App\Service\PromptLoader::class),
             $em ?? $this->createMock(EntityManagerInterface::class),
             $logger ?? $this->createMock(LoggerInterface::class),
         );
@@ -386,7 +429,7 @@ class BoampFinderServiceTest extends TestCase
         $productRepository = $this->createStub(ProductRepository::class);
         $productRepository->method('findAll')->willReturn([$product]);
         $marketProductRepository = $this->createStub(MarketProductRepository::class);
-        $marketProductRepository->method('findByMarket')->with(42)->willReturn([$old]);
+        $marketProductRepository->method('findByMarket')->willReturn([$old]);
 
         $service = $this->buildService(
             productRepository: $productRepository,
@@ -407,45 +450,30 @@ class BoampFinderServiceTest extends TestCase
         return $method->invoke($service, $value);
     }
 
-    public function testScoringPromptUsesLightCatalogueNotFiche(): void
+    /**
+     * @param array<string, mixed> $result
+     *
+     * @return array{Market, MarketProduct[]}
+     */
+    private function applyScoringResult(array $result, ?LoggerInterface $logger = null): array
     {
-        $service = $this->buildService();
+        $formation = (new Product())->setName('formation-ia');
+        (new \ReflectionProperty(Product::class, 'id'))->setValue($formation, 83);
 
-        $product = (new Product())
-            ->setName('Planigram')
-            ->setDescription('Description courte pour acheteurs publics')
-            ->setKeywords('GED,SIRH')
-            ->setSectors('Santé,Éducation')
-            ->setFiche('# Fiche complète Markdown avec beaucoup de détails techniques...');
+        $productRepository = $this->createStub(ProductRepository::class);
+        $productRepository->method('findAll')->willReturn([$formation]);
+        $marketProductRepository = $this->createStub(MarketProductRepository::class);
+        $marketProductRepository->method('findByMarket')->willReturn([]);
 
-        $details = [
-            'idweb' => '26-12345',
-            'objet' => 'Audit',
-            'nomacheteur' => 'Min',
-            'datelimitereponse' => '2026-12-31T12:00:00+00:00',
-            'montant' => '50000',
-        ];
+        $market = (new Market())->setIdweb('26-103940')->setTitle('Formation IAG');
+        (new \ReflectionProperty(Market::class, 'id'))->setValue($market, 3655);
 
-        $reflection = new \ReflectionClass($service);
-        $method = $reflection->getMethod('buildScoringPrompt');
-        $method->setAccessible(true);
-
-        $prompt = $method->invoke(
-            $service,
-            [$product],
-            '26-12345',
-            'Audit',
-            'Min',
-            'desc',
-            '50000',
-            '2026-12-31',
-            $details,
+        $service = $this->buildService(
+            productRepository: $productRepository,
+            marketProductRepository: $marketProductRepository,
+            logger: $logger,
         );
 
-        $this->assertStringContainsString('Planigram', $prompt);
-        $this->assertStringContainsString('Description courte pour acheteurs publics', $prompt);
-        $this->assertStringContainsString('GED,SIRH', $prompt);
-        $this->assertStringContainsString('Santé,Éducation', $prompt);
-        $this->assertStringNotContainsString('# Fiche complète Markdown', $prompt);
+        return [$market, $service->applyScoringResult($market, $result)];
     }
 }

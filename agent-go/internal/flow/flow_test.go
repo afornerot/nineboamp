@@ -69,7 +69,7 @@ func testPrompts(t *testing.T) *prompts.Prompts {
 	dir := t.TempDir()
 	writePrompt(t, dir, "chat.context.md", "---\ntemperature: 0.3\n---\n\nSYSTEME CHAT\n")
 	writePrompt(t, dir, "scoring.role.md", "SYSTEME SCORING\n")
-	writePrompt(t, dir, "scoring.user.md", "TEMPLATE SCORING\n")
+	writePrompt(t, dir, "scoring.user.md", "IDWEB:{{idweb}}|TITRE:{{title}}|ACHETEUR:{{buyer}}|DESC:{{description}}|MONTANT:{{amount}}|LIMITE:{{deadline}}|CAT:{{catalogue}}\n")
 	writePrompt(t, dir, "report.system.md", "SYSTEME RAPPORT\n")
 	writePrompt(t, dir, "report.user.md", "META:{{metadata}}|DESC:{{description}}|PROD:{{products}}|CAT:{{catalogue}}|HIST:{{chatHistory}}\n")
 	return prompts.New(dir)
@@ -214,6 +214,45 @@ func TestScoreStructuredSuccess(t *testing.T) {
 	}
 }
 
+func TestScoreUserPromptSubstitutesTemplate(t *testing.T) {
+	client := &fakeClient{queue: []fakeCall{
+		assistant(`{"score": 94, "priority": "A", "explanation": "Formation IA.", "products": [{"id": 83, "name": "formation-ia", "score": 94}]}`),
+	}}
+	svc := newService(t, client, nil, Config{})
+
+	status, _ := svc.Score(context.Background(), ScoreRequest{
+		MarketID:    3655,
+		Idweb:       "26-103940",
+		Title:       "Formation aux outils d'IA générative",
+		Buyer:       "Département de la Savoie",
+		Description: "Prestations de formation des agents aux outils d'IA générative.",
+		Amount:      "Information non disponible",
+		Deadline:    "2026-12-03",
+		Products:    []map[string]any{{"id": 83.0, "name": "formation-ia", "keywords": "IA, formation, IAG"}},
+	})
+	if status != StatusDone {
+		t.Fatalf("status = %q", status)
+	}
+
+	prompt := client.calls[0].messages[1].Content()
+	if strings.Contains(prompt, "{{") {
+		t.Errorf("placeholders non substitués : %s", prompt)
+	}
+	for _, want := range []string{
+		"26-103940",
+		"Formation aux outils d'IA générative",
+		"Département de la Savoie",
+		"2026-12-03",
+		"formation-ia",
+		"(ID: 83)",
+		"Mots-clés: IA, formation, IAG",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt sans %q : %s", want, prompt)
+		}
+	}
+}
+
 func TestScoreFallbackToPlainCall(t *testing.T) {
 	client := &fakeClient{queue: []fakeCall{
 		failing(errors.New("response_format non supporté")),
@@ -257,6 +296,46 @@ func TestScoreDefaultsAndProseJSON(t *testing.T) {
 	}
 	if score.Products == nil {
 		t.Error("products doit être un tableau vide, pas null")
+	}
+}
+
+func TestScoreBoundsProductTextFields(t *testing.T) {
+	// Forme observée en production (marché 3655) : le modèle déverse toute son
+	// analyse dans scoreDetails et laisse relevance vide.
+	long := strings.Repeat("analyse détaillée du besoin. ", 400)
+	client := &fakeClient{queue: []fakeCall{
+		assistant(`{"score": 92, "priority": "A", "explanation": "` + long + `", "products": [
+			{"id": 83, "name": "formation-ia", "score": 92, "priority": "A", "relevance": "` + long + `", "scoreDetails": "` + long + `"},
+			{"id": 84, "name": "lacanne", "score": 0, "priority": "C", "relevance": "` + long + `", "scoreDetails": "` + long + `"}
+		]}`),
+	}}
+	svc := newService(t, client, nil, Config{})
+
+	status, result := svc.Score(context.Background(), ScoreRequest{})
+	if status != StatusDone {
+		t.Fatalf("status = %q, result = %+v", status, result)
+	}
+	score := result.(ScoreSuccess)
+
+	if n := len([]rune(score.Explanation)); n > maxExplanationRunes {
+		t.Errorf("explanation = %d runes, max %d", n, maxExplanationRunes)
+	}
+	if !strings.HasSuffix(score.Explanation, "besoin.") {
+		t.Errorf("explanation tronquée en pleine phrase : %q", score.Explanation[len(score.Explanation)-40:])
+	}
+
+	kept := score.Products[0]
+	if n := len([]rune(kept["relevance"].(string))); n > maxRelevanceRunes {
+		t.Errorf("relevance = %d runes, max %d", n, maxRelevanceRunes)
+	}
+	if n := len([]rune(kept["scoreDetails"].(string))); n > maxScoreDetailsRunes {
+		t.Errorf("scoreDetails = %d runes, max %d", n, maxScoreDetailsRunes)
+	}
+
+	// Un produit à 0 est réduit à son identité : aucun texte sur la fiche.
+	zero := score.Products[1]
+	if len(zero) != 4 || zero["name"] != "lacanne" || zero["score"] != 0 {
+		t.Errorf("produit non pertinent = %v, attendu {id, name, score, priority}", zero)
 	}
 }
 

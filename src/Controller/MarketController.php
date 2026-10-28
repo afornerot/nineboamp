@@ -5,9 +5,9 @@ namespace App\Controller;
 use App\Controller\Trait\AgentJobPollTrait;
 use App\Controller\Trait\LayoutRenderTrait;
 use App\Entity\Market;
-use App\Entity\MarketProduct;
 use App\Form\MarketEditType;
 use App\Repository\MarketRepository;
+use App\Repository\ProductRepository;
 use App\Service\AmoxtliService;
 use App\Service\BoampFinderService;
 use App\Service\DompdfFactory;
@@ -76,33 +76,28 @@ class MarketController extends AbstractController
     }
 
     #[Route('/user/market/{id}/rescore', name: 'app_market_rescore', methods: ['POST'])]
-    public function rescore(int $id, MarketRepository $marketRepository, ScoringAgentService $scoringAgent): JsonResponse
+    public function rescore(int $id, MarketRepository $marketRepository, ProductRepository $productRepository, ScoringAgentService $scoringAgent): JsonResponse
     {
         $market = $marketRepository->find($id);
         if (!$market) {
             return new JsonResponse(['error' => 'Marché introuvable'], 404);
         }
 
-        $rawData = $market->getRawData();
-        if (null === $rawData) {
-            return new JsonResponse(['error' => 'Aucune donnée brute disponible pour ce marché'], 400);
-        }
-
         $products = [];
-        foreach ($market->getMarketProducts() as $mp) {
-            $product = $mp->getProduct();
+        foreach ($productRepository->findAll() as $product) {
             $products[] = [
-                'name' => $product?->getName() ?? 'Unknown',
-                'description' => $product?->getDescription() ?? '',
-                'keywords' => $product?->getKeywords() ?? '',
-                'sectors' => $product?->getSectors() ?? '',
-                'score' => $mp->getScore(),
+                'id' => $product->getId(),
+                'name' => $product->getName() ?? '',
+                'description' => $product->getDescription() ?? '',
+                'keywords' => $product->getKeywords() ?? '',
+                'sectors' => $product->getSectors() ?? '',
             ];
         }
 
         try {
             $job = $scoringAgent->startScoringJob(
                 $market->getId(),
+                $market->getIdweb() ?? '',
                 $market->getTitle() ?? '',
                 $market->getBuyer() ?? '',
                 $market->getDescription() ?? '',
@@ -118,7 +113,7 @@ class MarketController extends AbstractController
     }
 
     #[Route('/user/market/{id}/rescore/poll/{jobId}', name: 'app_market_rescore_poll', methods: ['GET'])]
-    public function pollRescore(int $id, string $jobId, MarketRepository $marketRepository, ScoringAgentService $scoringAgent, EntityManagerInterface $em): JsonResponse
+    public function pollRescore(int $id, string $jobId, MarketRepository $marketRepository, ScoringAgentService $scoringAgent, BoampFinderService $finder): JsonResponse
     {
         $job = $scoringAgent->getScoringResult($jobId);
 
@@ -128,37 +123,7 @@ class MarketController extends AbstractController
                 return new JsonResponse(['status' => 'error', 'error' => 'Marché introuvable']);
             }
 
-            $data = $job->result;
-
-            $market->setScore($data['score'] ?? 0);
-            $market->setPriority($data['priority'] ?? 'C');
-            $market->setExplanation($data['explanation'] ?? null);
-
-            foreach ($market->getMarketProducts() as $mp) {
-                $market->removeMarketProduct($mp);
-                $em->remove($mp);
-            }
-
-            $productRepo = $em->getRepository(\App\Entity\Product::class);
-
-            foreach ($data['products'] ?? [] as $p) {
-                $product = $productRepo->findOneBy(['name' => $p['name'] ?? '']);
-                if (!$product) {
-                    continue;
-                }
-                $mp = new MarketProduct();
-                $mp->setMarket($market);
-                $mp->setProduct($product);
-                $mp->setScore($p['score'] ?? null);
-                $mp->setPriority($p['priority'] ?? null);
-                $mp->setRelevance($p['relevance'] ?? null);
-                $mp->setScoreDetails($p['scoreDetails'] ?? null);
-                $market->addMarketProduct($mp);
-                $em->persist($mp);
-            }
-
-            $em->persist($market);
-            $em->flush();
+            $finder->applyScoringResult($market, $job->result);
 
             return new JsonResponse([
                 'status' => 'done',

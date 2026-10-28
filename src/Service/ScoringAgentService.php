@@ -21,6 +21,7 @@ class ScoringAgentService
      */
     public function startScoringJob(
         int $marketId,
+        string $idweb,
         string $title,
         string $buyer,
         string $description,
@@ -30,6 +31,7 @@ class ScoringAgentService
     ): array {
         return $this->agentJobs->start(AgentJobClient::SCORE, [
             'market_id' => $marketId,
+            'idweb' => $idweb,
             'title' => $title,
             'buyer' => $buyer,
             'description' => $description,

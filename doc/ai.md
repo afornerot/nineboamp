@@ -149,7 +149,12 @@ Les prompts sont stockés dans `src/DataFixtures/data/scoring/*.md` (plus de BDD
 |---------|------|
 | `chat.context.md` | System prompt pour le chat agenté (avec placeholders `{{metadata}}`, `{{description}}`, etc.) |
 | `scoring.role.md` | Rôle LLM pour le scoring (contexte entreprise + chapitre "ce que nous ne faisons pas") |
-| `scoring.user.md` | Prompt de scoring marché par marché (JSON strict) |
+| `scoring.user.md` | Prompt de scoring marché par marché (JSON strict, placeholders `{{idweb}}`, `{{title}}`, `{{buyer}}`, `{{description}}`, `{{amount}}`, `{{deadline}}`, `{{catalogue}}`) |
+
+Le catalogue est rendu par l'agent sous la forme `- **nom** (ID: 83)` : le LLM
+reprend cet `id` dans chaque entrée `products[]`, et PHP associe le produit par
+ID (`BoampFinderService::applyScoringResult()`), à défaut par nom exact. Une
+entrée dont le produit est introuvable est ignorée et journalisée en `warning`.
 
 Les prompts supportent un frontmatter YAML minimal :
 

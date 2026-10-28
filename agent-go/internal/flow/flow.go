@@ -5,6 +5,7 @@ package flow
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -37,6 +38,7 @@ type ChatRequest struct {
 // ScoreRequest est le corps de POST /score.
 type ScoreRequest struct {
 	MarketID    int              `json:"market_id"`
+	Idweb       string           `json:"idweb"`
 	Title       string           `json:"title"`
 	Buyer       string           `json:"buyer"`
 	Description string           `json:"description"`
@@ -194,6 +196,9 @@ func formatProducts(products []map[string]any, emptyFallback string) string {
 		sectors, _ := p["sectors"].(string)
 
 		b.WriteString("- **" + name + "**")
+		if id, ok := atoiFlexible(p["id"]); ok {
+			b.WriteString(fmt.Sprintf(" (ID: %d)", id))
+		}
 		if desc != "" {
 			b.WriteString("\n  Description: " + truncateRunes(desc, 200))
 		}

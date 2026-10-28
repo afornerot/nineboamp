@@ -515,6 +515,178 @@ class AmoxtliService
     }
 
     /**
+     * Retire une pièce de l'index amoxtli d'un marché.
+     *
+     * L'entrée du corpus part d'abord : un `sync` ultérieur réindexerait le
+     * fichier tant qu'il serait dans le corpus (mesuré : `amoxtli sync` remet
+     * dans l'index une entrée retirée par `doc delete`). Le document est
+     * ensuite supprimé de l'index et de son magasin, par son URL de source.
+     *
+     * @param string $piece  nom de la pièce, relatif au dossier du marché
+     *
+     * @return bool false si la pièce n'était pas indexée
+     */
+    public function unindexDocument(string $marketId, string $piece): bool
+    {
+        if (!$this->isAvailable()) {
+            return false;
+        }
+
+        $id = $this->checkMarketId($marketId);
+        $workspacePath = $this->getWorkspacePath($id);
+
+        if (!is_dir($workspacePath.'/.amoxtli')) {
+            return false;
+        }
+
+        // Le rapport relie l'entrée du corpus à la pièce d'origine.
+        $report = $this->readReport($id);
+        $entry = $this->corpusEntryOf($report, $piece);
+
+        if (null === $entry) {
+            return false;
+        }
+
+        $lock = $this->createMarketLock($id);
+        $lock->acquire(true);
+
+        try {
+            // L'entrée du corpus d'abord : c'est elle que le sync réindexerait.
+            $corpusPath = $workspacePath.'/corpus';
+            if (is_file($corpusPath.'/'.$entry)) {
+                (new Filesystem())->remove($corpusPath.'/'.$entry);
+            }
+
+            $deleted = $this->deleteDocument($workspacePath, $entry);
+
+            // Le rapport suit l'index : la pièce n'y est plus.
+            unset($report['sources'][$entry], $report['fingerprints'][$piece], $report['fallbacks'][$piece]);
+            $report['converted'] = array_values(array_diff($report['converted'], [$piece]));
+            $report['copied'] = array_values(array_diff($report['copied'], [$piece]));
+            $report['failed'] = array_values(array_filter($report['failed'], fn (array $failure): bool => $failure['file'] !== $piece));
+            $report['unsupported'] = array_values(array_diff($report['unsupported'], [$piece]));
+            $report['removed'] = array_values(array_diff($report['removed'], [$entry]));
+            (new Filesystem())->dumpFile($this->getReportPath($id), json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR));
+
+            return $deleted;
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * Entrée du corpus d'une pièce, d'après le rapport d'indexation.
+     *
+     * Une pièce convertie a deux entrées possibles : son texte converti
+     * (CCTP.pdf.txt) et le texte de repli qui l'a remplacée. Les deux
+     * peuvent figurer dans le rapport : celle qui a été indexée est la
+     * dernière.
+     *
+     * @param array<string, mixed> $report
+     */
+    private function corpusEntryOf(array $report, string $piece): ?string
+    {
+        $sources = $report['sources'] ?? [];
+
+        if (!is_array($sources)) {
+            return null;
+        }
+
+        $entries = [];
+        foreach ($sources as $entry => $file) {
+            if ($file === $piece) {
+                $entries[] = $entry;
+            }
+        }
+
+        if ([] === $entries) {
+            return null;
+        }
+
+        return end($entries);
+    }
+
+    /**
+     * Supprime un document de l'index et de son magasin, par son URL de source.
+     *
+     * La commande annonce « Deleted 1 document(s) » même quand la source
+     * n'était pas dans l'index : seul l'état de l'index dit si la suppression
+     * a eu lieu. C'est lui qui est interrogé.
+     *
+     * @return bool false si le document n'était pas dans l'index
+     */
+    private function deleteDocument(string $workspacePath, string $entry): bool
+    {
+        $process = new Process([
+            $this->binaryPath,
+            '--json',
+            '-C', $workspacePath,
+            'doc', 'delete',
+            '--source', 'file:///'.$this->encodeSource($entry),
+            '--yes',
+        ]);
+        $process->setTimeout(60);
+
+        $this->runAmoxtli($process, self::WRITE_WAIT);
+
+        if (!$process->isSuccessful()) {
+            throw new ProcessFailedException($process);
+        }
+
+        foreach ($this->fetchDocuments($workspacePath) as $document) {
+            if ($this->entryOf((string) ($document['source'] ?? '')) === $entry) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Une source amoxtli est une URL : le chemin est encodé, les séparateurs
+     * de répertoires ne le sont pas (file:///sub/ANNEXE%20RC.pdf.txt).
+     *
+     * L'encodage est celui de Go (net/url), pas celui de rawurlencode() : il
+     * laisse « $ & + , : ; = @ » tels quels, et échappe « ? ». Un nom de
+     * fichier contenant « + » a donc pour source « file:///a+b.txt ».
+     */
+    private function encodeSource(string $entry): string
+    {
+        $segments = explode('/', $entry);
+
+        foreach ($segments as $index => $segment) {
+            $segments[$index] = $this->encodePathSegment($segment);
+        }
+
+        return implode('/', $segments);
+    }
+
+    /**
+     * Échappe un segment de chemin comme le fait Go en mode encodePath.
+     */
+    private function encodePathSegment(string $segment): string
+    {
+        $encoded = '';
+        $length = strlen($segment);
+
+        for ($i = 0; $i < $length; ++$i) {
+            $char = $segment[$i];
+
+            // Alphanumériques et « - _ . ~ », puis les « pchar » de la RFC 3986
+            // que Go laisse tels quels en mode encodePath.
+            if (preg_match('/[A-Za-z0-9\-_.~$&,+:;=@]/', $char)) {
+                $encoded .= $char;
+
+                continue;
+            }
+
+            $encoded .= sprintf('%%%02X', ord($char));
+        }
+
+        return $encoded;
+    }
+
+    /**
      * @return array{available: bool, initialized: bool, documents: array<int, array{filename: ?string, extension: ?string, size: ?int, indexed_at: ?string, source: ?string, etag: ?string}>, unindexed: list<array{file: string, reason: string}>, error: ?string}
      */
     public function listIndexedDocuments(string $marketId): array

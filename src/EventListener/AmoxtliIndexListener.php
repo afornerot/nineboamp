@@ -3,6 +3,7 @@
 namespace App\EventListener;
 
 use App\Message\IndexMarketMessage;
+use App\Message\UnindexDocumentMessage;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\HttpKernel\Event\ResponseEvent;
@@ -55,8 +56,52 @@ class AmoxtliIndexListener implements EventSubscriberInterface
         // L'id d'un upload vient de la query : seul un id numérique désigne un marché.
         $id = (string) $parameters->get('id');
 
-        if (ctype_digit($id)) {
-            $this->messageBus->dispatch(new IndexMarketMessage($id));
+        if (!ctype_digit($id)) {
+            return;
         }
+
+        if ('bninefiles_files_delete' === $route) {
+            // La suppression d'une pièce la désindexe, sans réindexer le marché.
+            $piece = $this->deletedPiece($request);
+
+            if (null !== $piece) {
+                $this->messageBus->dispatch(new UnindexDocumentMessage($id, $piece));
+            }
+
+            return;
+        }
+
+        $this->messageBus->dispatch(new IndexMarketMessage($id));
+    }
+
+    /**
+     * Nom de la pièce supprimée, relatif au dossier du marché.
+     *
+     * Le bundle envoie le chemin du fichier supprimé dans le corps de la
+     * requête. Le corps est déjà lu à ce stade : c'est la requête qui l'a
+     * décodé pour répondre.
+     */
+    private function deletedPiece(\Symfony\Component\HttpFoundation\Request $request): ?string
+    {
+        $content = $request->getContent();
+
+        if (!is_string($content) || '' === $content) {
+            return null;
+        }
+
+        $data = json_decode($content, true);
+        $path = is_array($data) ? ($data['path'] ?? null) : null;
+
+        if (!is_string($path) || '' === $path) {
+            return null;
+        }
+
+        // Un chemin absolu ou remontant hors du dossier du marché n'est pas
+        // une pièce de ce marché.
+        if (str_starts_with($path, '/') || str_contains($path, '..')) {
+            return null;
+        }
+
+        return $path;
     }
 }

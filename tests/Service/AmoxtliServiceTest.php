@@ -657,6 +657,82 @@ class AmoxtliServiceTest extends TestCase
         $this->assertCount(51, $this->indexedFiles());
     }
 
+    public function testUnindexedPieceLeavesTheIndexWithoutReindexingTheMarket(): void
+    {
+        $this->pdf('CCAP.pdf', 'Clause disparueclause.');
+        file_put_contents($this->marketPath.'/notes.txt', 'Notes restantesnote.');
+        $this->index();
+        $this->assertSame(['CCAP.pdf', 'notes.txt'], $this->indexedFiles());
+
+        // La pièce a déjà été supprimée du disque par le bundle de fichiers.
+        unlink($this->marketPath.'/CCAP.pdf');
+        $unindexed = $this->service->unindexDocument('1', 'CCAP.pdf');
+
+        $this->assertTrue($unindexed);
+        $this->assertSame(['notes.txt'], $this->indexedFiles());
+        $this->assertSame([], $this->search('disparueclause'));
+        $this->assertSame(['notes.txt'], $this->search('restantesnote'));
+    }
+
+    public function testUnindexedPieceIsNotResurrectedByTheNextIndexing(): void
+    {
+        $this->pdf('CCAP.pdf', 'Clause disparueclause.');
+        $this->index();
+
+        unlink($this->marketPath.'/CCAP.pdf');
+        $this->service->unindexDocument('1', 'CCAP.pdf');
+
+        // La réindexation suivante ne doit pas remettre la pièce dans l'index.
+        $this->index();
+
+        $this->assertSame([], $this->indexedFiles());
+        $this->assertSame([], $this->search('disparueclause'));
+    }
+
+    public function testUnindexingAPieceThatWasNotIndexedDoesNothing(): void
+    {
+        $this->pdf('CCAP.pdf', 'Clause du marchéclause.');
+        $this->index();
+
+        $unindexed = $this->service->unindexDocument('1', 'absente.pdf');
+
+        $this->assertFalse($unindexed);
+        $this->assertSame(['CCAP.pdf'], $this->indexedFiles());
+    }
+
+    public function testUnindexingAPieceWithAwkwardNameRemovesIt(): void
+    {
+        // Les caractères que l'encodage de source de Go laisse tels quels.
+        $name = 'ANNEXE RC & D+JA.pdf';
+        $this->pdf($name, 'Clauseymbriqueclause.');
+        $this->index();
+        $this->assertSame([$name], $this->indexedFiles());
+
+        unlink($this->marketPath.'/'.$name);
+        $unindexed = $this->service->unindexDocument('1', $name);
+
+        $this->assertTrue($unindexed);
+        $this->assertSame([], $this->indexedFiles());
+        $this->assertSame([], $this->search('ymbriqueclause'));
+    }
+
+    public function testUnindexedPieceIsNoLongerInTheReport(): void
+    {
+        $this->pdf('CCAP.pdf', 'Clause du marchéclause.');
+        file_put_contents($this->marketPath.'/notes.txt', 'Notes.');
+        $this->index();
+
+        unlink($this->marketPath.'/CCAP.pdf');
+        $this->service->unindexDocument('1', 'CCAP.pdf');
+
+        $report = json_decode((string) file_get_contents($this->projectDir.'/uploads/amoxtli/1/corpus-report.json'), true);
+
+        $this->assertArrayNotHasKey('CCAP.pdf.txt', $report['sources']);
+        $this->assertArrayNotHasKey('CCAP.pdf', $report['fingerprints']);
+        $this->assertNotContains('CCAP.pdf', $report['converted']);
+        $this->assertContains('notes.txt', $report['copied']);
+    }
+
     /**
      * @return CorpusReport
      */

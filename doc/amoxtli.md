@@ -22,12 +22,38 @@
 
 Déclenchée :
 
-- automatiquement à chaque upload ou suppression d'une pièce d'un marché
+- automatiquement à chaque upload d'une pièce d'un marché
   (listener `AmoxtliIndexListener`, domaine `boamp` et id numérique
   uniquement → dispatch `IndexMarketMessage` sur le transport `amoxtli`,
   traité par son propre worker `messenger:consume amoxtli` : une longue
   indexation ne retarde pas les emails du transport `async`) ;
+- à chaque suppression d'une pièce, par une désindexation ciblée (voir plus
+  bas) ;
 - manuellement par `app:amoxtli:reindex` (voir plus bas).
+
+### Suppression d'une pièce
+
+La suppression d'une pièce ne réindexe pas le marché : elle désindexe la
+seule pièce supprimée (`AmoxtliService::unindexDocument()`, message
+`UnindexDocumentMessage`, même transport `amoxtli` que l'indexation).
+
+Dans l'ordre :
+
+1. l'entrée de la pièce disparaît du corpus
+   (`uploads/amoxtli/{id}/corpus/`) ;
+2. `amoxtli doc delete --source file:///<entrée> --yes` retire le document
+   de l'index et de son magasin ;
+3. le rapport (`corpus-report.json`) ne mentionne plus la pièce.
+
+L'entrée du corpus part **avant** la suppression du document : un `sync`
+ultérieur remettrait dans l'index une entrée encore présente dans le corpus
+(mesuré). La source est l'URL de la pièce, encodée comme le fait Go
+(`net/url`) : les séparateurs de répertoires et « $ & + , : ; = @ » ne sont
+pas échappés, les autres caractères le sont.
+
+La commande annonce « Deleted 1 document(s) » même quand la source n'était
+pas dans l'index : c'est l'état de l'index après la commande qui dit si la
+suppression a eu lieu.
 
 Étapes de `AmoxtliService::indexMarket()`, sous un verrou
 `amoxtli-market-{id}` (le worker et la commande peuvent viser le même marché) :

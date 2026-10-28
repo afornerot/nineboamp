@@ -36,3 +36,4 @@ framework:
 
             # Route your messages to the transports
             'App\Message\IndexMarketMessage': amoxtli
+            'App\Message\UnindexDocumentMessage': amoxtli

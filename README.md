@@ -63,9 +63,14 @@ Les valeurs `changeme` conviennent pour un poste local. Avant toute mise en prod
 
 ```bash
 mkdir -p var uploads public/uploads    # avant le premier up, sinon Docker les crée en root
-docker compose up -d --build
-docker compose logs -f nineboamp       # attendre la ligne « START HTTPD »
+./misc/script/up.sh up -d --build       # transmet l'UID courant au conteneur
+./misc/script/up.sh logs -f nineboamp   # attendre la ligne « START HTTPD »
 ```
+
+> `up.sh` ne fait qu'exporter `LOCAL_UID=$(id -u)` avant d'appeler
+> `docker compose` : le conteneur tourne sans privilèges, avec l'UID qui possède
+> les volumes montés. Si un répertoire appartient à un autre compte, l'entrypoint
+> s'arrête et affiche la commande `chown` à passer sur l'hôte.
 
 Au démarrage, le conteneur attend que MariaDB soit prête, met à jour le schéma, puis lance `app:init`. Si la base ne contient encore aucun compte, cette commande charge les fixtures : compte admin, crons et produits, avec appel à l'IA pour chaque produit (environ une minute). Aux démarrages suivants, elle ne touche à rien.
 

@@ -66,17 +66,25 @@ services:
       DATABASE_URL: "mysql://nineboamp:un_autre_mdp@mariadb:3306/nineboamp"
 ```
 
-> **Note** : `compose.yaml` fait démarrer le container en root (`user: "0:0"`),
-> puis `misc/script/entrypoint.sh` abandonne les privilèges en adoptant l'UID
-> qui possède `src/` sur l'hôte. Les volumes montés sont donc lisibles et
-> inscriptibles des deux côtés, sans aucun `chmod`.
+> **Note** : le container tourne sans privilèges, avec l'UID de l'utilisateur
+> hôte (`misc/script/up.sh` le transmet dans `LOCAL_UID`) et le GID 101
+> (`apache`). `misc/script/entrypoint.sh` vérifie au démarrage que les volumes
+> montés appartiennent bien à cet UID, et s'arrête sinon en affichant la commande
+> `chown` à lancer.
 
 ## 4. Monter les containers
 
 ```bash
 mkdir -p var uploads public/uploads
-docker compose up -d --build
+./misc/script/up.sh up -d --build
 ```
+
+> **Pourquoi `up.sh` et pas `docker compose` directement** : `compose.yaml`
+> exige `LOCAL_UID`, que le script remplit avec `id -u`. On ne peut pas lire
+> `${UID}` dans le compose : bash ne l'exporte pas, donc la valeur retombait sur
+> un défaut (1000) et le container tournait avec un autre UID que les volumes —
+> `app:cron` échouait alors en « Permission denied » et amoxtli ne pouvait plus
+> lire les workspaces de l'onglet « Documents indexés ».
 
 > **Pourquoi `mkdir` avant le premier `up`** : si un répertoire monté
 > n'existe pas encore sur l'hôte, Docker le crée en propriétaire
@@ -85,19 +93,19 @@ docker compose up -d --build
 
 L'application est accessible sur http://localhost:8024
 
-## Permissions — plateau
+## Permissions
 
-`misc/script/entrypoint.sh` fait tout, il n'y a rien à régler :
+Le container ne prend jamais de privilèges. `misc/script/entrypoint.sh` vérifie
+seulement que `var/`, `uploads/` et `public/uploads/` sont inscriptibles par
+l'UID du process ; sinon il s'arrête avant de lancer quoi que ce soit, en
+affichant la commande à passer sur l'hôte. C'est le seul cas où une action
+manuelle est nécessaire :
 
-1. il démarre en root, lit l'UID propriétaire de `/app/src` (le `src/` monté,
-   donc celui de l'utilisateur hôte) ;
-2. il réaligne `var/`, `uploads/` et `public/uploads/` sur cet UID avec le
-   GID 101 (`apache`) ;
-3. il abandonne les privilèges avec `su-exec` avant de lancer l'application.
+```bash
+sudo chown -R "$(id -u)":101 var uploads public/uploads
+```
 
-L'UID n'est volontairement pas lu depuis `${UID}` : bash ne l'exporte pas, donc
-`user: "${UID:-1000}"` retombait toujours sur 1000 et le crontab échouait en
-« Permission denied » dès que l'utilisateur hôte avait un autre UID.
-
-Le réalignement est idempotent : au démarrage suivant les fichiers appartiennent
-déjà au bon compte, `chown` ne réécrit que les métadonnées.
+Ce cas survient quand la stack a été démarrée par un container tournant avec un
+autre UID (ancienne configuration, ou `docker compose` lancé sans `up.sh`) : les
+fichiers créés alors appartiennent à cet UID, y compris les workspaces amoxtli
+en `750` que le nouveau process ne peut plus lire.

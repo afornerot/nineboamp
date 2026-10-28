@@ -25,13 +25,10 @@ COPY --from=agentbuild --chown=root:root /out/nineagent /usr/local/bin/nineagent
 WORKDIR /app
 COPY --chown=apache:apache . .
 
-# Outils du pipeline amoxtli (pdftotext, pandoc, .doc → texte via catdoc ou
-# antiword, xlsx/xls → csv via openpyxl/xlrd)
 USER root
-# su-exec : abandon des privilèges dans l'entrypoint (setpriv de BusyBox n'a pas
-# --reuid) ; outils du pipeline amoxtli (pdftotext, pandoc, .doc → texte via
-# antiword, xlsx/xls → csv via openpyxl/xlrd).
-RUN apk add --no-cache su-exec poppler-utils pandoc antiword python3 py3-pip build-base \
+# Outils du pipeline amoxtli (pdftotext, pandoc, .doc → texte via antiword,
+# xlsx/xls → csv via openpyxl/xlrd)
+RUN apk add --no-cache poppler-utils pandoc antiword python3 py3-pip build-base \
     && pip3 install --no-cache-dir --break-system-packages openpyxl xlrd
 USER apache
 

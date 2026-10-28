@@ -65,11 +65,13 @@ consommés par deux workers lancés en parallèle des crons :
 
 ## Permissions des volumes
 
-Le container démarre en root (`user: "0:0"` dans `compose.yaml`) puis
-`misc/script/entrypoint.sh` abandonne les privilèges : il aligne `var/` sur le
-propriétaire de `src/` (l'utilisateur hôte, qui possède les bind mounts) et
-relance le CMD avec cet UID et le GID 101 (`apache`). Déduire l'UID du montage
-est nécessaire : `${UID}` n'est pas exporté par bash, donc l'ancienne
-interpolation `user: "${UID:-1000}:${GID:-101}"` retombait sur 1000 et chaque
+Le container tourne sans privilèges, avec l'UID de l'utilisateur hôte (transmis
+par `misc/script/up.sh` dans `LOCAL_UID`) et le GID 101 (`apache`).
+`misc/script/entrypoint.sh` vérifie au démarrage que `var/`, `uploads/` et
+`public/uploads/` sont inscriptibles par cet UID ; sinon il s'arrête en
+affichant la commande `chown` à lancer sur l'hôte.
+
+Ce garde-fou existe parce que `${UID}` ne peut pas servir dans `compose.yaml` :
+bash ne l'exporte pas, l'interpolation retombait sur 1000 et chaque
 `>> var/log/cron.log` échouait en « Permission denied » (`app:cron` sortait en
-code 1 chaque minute).
+code 1 chaque minute, sans trace dans le log).

@@ -26,10 +26,13 @@ services:
     container_name: nineboamp
     restart: unless-stopped
     image: reg.cadoles.com/envole/nineboamp
-    # L'entrypoint démarre en root pour aligner ./var sur le propriétaire du code
-    # monté, puis abandonne les privilèges (UID hôte, GID 101 = apache) : httpd
-    # garde l'écriture dans /var/log/apache2 et le crontab dans var/log/cron.log.
-    user: "0:0"
+    # Le container tourne SANS privilèges, avec l'UID de l'utilisateur hôte
+    # (bind mounts) et le GID 101 (apache) : httpd écrit dans /var/log/apache2.
+    # `${UID}` ne peut pas servir ici : bash ne l'exporte pas, l'interpolation
+    # retombait toujours sur 1000. `misc/script/up.sh` renseigne LOCAL_UID avec
+    # `id -u` ; sans lui, le défaut s'applique et l'entrypoint refuse de démarrer
+    # si les volumes appartiennent à un autre compte, en affichant le chown.
+    user: "${LOCAL_UID:-1000}:101"
     depends_on:
       mariadb:
         condition: service_healthy

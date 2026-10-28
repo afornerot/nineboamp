@@ -19,10 +19,10 @@ for dir in /app/var /app/var/log /app/uploads /app/public/uploads; do
     owner="$(stat -c '%u:%g' "$dir")"
     cat >&2 <<EOF
 
-ERREUR : $dir appartient à $owner, le container tourne en UID $(id -u) (apache).
+ERREUR : $dir appartient à $owner, le container tourne en UID $(id -u):$(id -g).
 
 Les répertoires montés depuis l'hôte doivent appartenir à l'utilisateur
-\`apache\` du container. Depuis l'hôte, à la racine du projet :
+\`apache\` du container (100:101). Depuis l'hôte, à la racine du projet :
 
     sudo chown -R 100:101 var uploads public/uploads
 

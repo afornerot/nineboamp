@@ -708,7 +708,7 @@
 
         var indexedDocsTab = document.getElementById('tab-indexed-docs-btn');
         var indexedDocsBody = document.getElementById('indexed-docs-body');
-        var indexedDocsLoaded = false;
+        var indexedDocsTimer = null;
 
         function formatBytes(bytes) {
             if (!bytes || bytes <= 0) return '?';
@@ -773,9 +773,11 @@
             indexedDocsBody.innerHTML = html;
         }
 
+        // L'indexation est différée : un dépôt ou une suppression de pièce ne
+        // change l'index qu'après le passage du worker. Sans rechargement, la
+        // liste reste figée jusqu'au rechargement de la page.
         function loadIndexedDocs() {
-            if (indexedDocsLoaded) return;
-            indexedDocsLoaded = true;
+            if (!indexedDocsBody) return;
             fetch('{{ path("app_market_indexed_docs", {id: market.id}) }}')
             .then(function(r) { return r.json(); })
             .then(function(data) { renderIndexedDocs(data); })
@@ -785,7 +787,20 @@
         }
 
         if (indexedDocsTab) {
-            indexedDocsTab.addEventListener('click', function() { loadIndexedDocs(); });
+            // À chaque activation de l'onglet : la liste est relue, puis
+            // rafraîchie tant que l'onglet reste ouvert.
+            indexedDocsTab.addEventListener('shown.bs.tab', function() {
+                loadIndexedDocs();
+                if (indexedDocsTimer) clearInterval(indexedDocsTimer);
+                indexedDocsTimer = setInterval(loadIndexedDocs, 5000);
+            });
+
+            indexedDocsTab.addEventListener('hidden.bs.tab', function() {
+                if (indexedDocsTimer) {
+                    clearInterval(indexedDocsTimer);
+                    indexedDocsTimer = null;
+                }
+            });
         }
 
         var reportsTab = document.getElementById('tab-reports-btn');

@@ -15,6 +15,11 @@ class MarketChatMessageRepository extends ServiceEntityRepository
     }
 
     /**
+     * Les $limit messages les plus récents du marché, du plus ancien au plus
+     * récent. Le tri décroissant porte sur la sélection : avec un tri croissant,
+     * le LIMIT gardait les messages les plus anciens et l'historique affiché
+     * ignorait toute la conversation récente. $limit = 0 retourne tout.
+     *
      * @return MarketChatMessage[]
      */
     public function findRecentForMarket(int $marketId, int $limit = 20): array
@@ -22,16 +27,20 @@ class MarketChatMessageRepository extends ServiceEntityRepository
         $qb = $this->createQueryBuilder('m')
             ->andWhere('m.market = :marketId')
             ->setParameter('marketId', $marketId)
-            ->orderBy('m.createdAt', SortDirection::Ascending);
+            ->orderBy('m.createdAt', SortDirection::Descending)
+            ->addOrderBy('m.id', SortDirection::Descending);
 
         if ($limit > 0) {
             $qb->setMaxResults($limit);
         }
 
-        return $qb->getQuery()->getResult();
+        return array_reverse($qb->getQuery()->getResult());
     }
 
     /**
+     * Les $limit messages marqués importants les plus récents, du plus ancien au
+     * plus récent (même sélection que findRecentForMarket()).
+     *
      * @return MarketChatMessage[]
      */
     public function findImportantForMarket(int $marketId, int $limit = 50): array
@@ -41,12 +50,13 @@ class MarketChatMessageRepository extends ServiceEntityRepository
             ->andWhere('m.important = :important')
             ->setParameter('marketId', $marketId)
             ->setParameter('important', true)
-            ->orderBy('m.createdAt', SortDirection::Ascending);
+            ->orderBy('m.createdAt', SortDirection::Descending)
+            ->addOrderBy('m.id', SortDirection::Descending);
 
         if ($limit > 0) {
             $qb->setMaxResults($limit);
         }
 
-        return $qb->getQuery()->getResult();
+        return array_reverse($qb->getQuery()->getResult());
     }
 }

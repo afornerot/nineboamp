@@ -31,18 +31,22 @@ Voici le marché à analyser en vue d'un rapport de positionnement commercial.
 
 ## Mission
 
-Produis le rapport de positionnement commercial complet, en respectant **strictement** le plan en 8 sections défini dans tes instructions système.
+Produis le rapport de positionnement commercial complet, en respectant **strictement** le plan en 10 sections défini dans tes instructions système.
 
 Workflow recommandé :
 1. Si tu as besoin de détails techniques sur le marché, utilise `list_documents` puis `amoxtli_search` sur les sections CCTP/BPU/CCAP pertinentes.
 2. Si tu dois confirmer les produits Cadoles à pousser, utilise `get_product_info(ID)` avec les IDs exacts.
-3. Si l'historique de chat pertinent contient des points saillants, intègre-les dans les sections 03, 05 et 08.
-4. Génère le rapport en Markdown brut, sans wrapper, en suivant l'ordre `## 01` → `## 08` sans rien omettre.
+3. Recherche avec `amoxtli_search` les contraintes imposées par l'acheteur (présence sur site, déplacements, astreintes, habilitations, références et capacités exigées, engagements contractuels) dans le règlement de consultation, le CCAP et le CCTP, pour la section 03.
+4. Relève les dates de la consultation et de l'exécution (règlement de consultation, CCAP) avec `amoxtli_search` pour la section 08.
+5. Si l'historique de chat pertinent contient des points saillants, intègre-les dans les sections 04, 05 et 10.
+6. Génère le rapport en Markdown brut, sans wrapper, en suivant l'ordre `## 01` → `## 10` sans rien omettre.
 
 ## Contraintes
 
 - **Markdown uniquement.** Pas de HTML, pas de bloc ```markdown, pas d'explication avant/après le rapport.
 - **Pas de PDF.** Le rendu PDF est appliqué en aval par l'application.
 - **Aucun méta-commentaire.** Le rapport commence directement par `## 01 De quoi on parle ?`.
+- La section 10 présente les arguments en faveur d'un GO avant les freins, quel que soit le verdict.
+- Toute contrainte imposée d'impact BLOQUANT ou LOURD apparaît à trois endroits : une carte en section 01, sa ligne en section 03, et « Ce qui freine » en section 10.
 - Si une information manque, écris-le explicitement (« Non communiqué dans l'avis. », « Estimation non disponible. ») au lieu d'inventer.
 - Cite les sources du marché (numéro de lot, référence article CCTP) quand tu fais une affirmation technique précise, entre parenthèses, en italique.

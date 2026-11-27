@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/bornholm/genai/llm"
 )
@@ -74,12 +75,13 @@ func (s *Service) Report(ctx context.Context, req ReportRequest) (status string,
 // à l'identique de process_report (agent/main.py).
 func buildReportUserPrompt(template string, req ReportRequest) string {
 	metadata := fmt.Sprintf(
-		"- ID: %d\n- Titre: %s\n- Acheteur: %s\n- Montant: %s\n- Deadline: %s",
+		"- ID: %d\n- Titre: %s\n- Acheteur: %s\n- Montant: %s\n- Deadline: %s\n- Date du jour: %s",
 		req.MarketID,
 		req.Title,
 		orDefault(req.Buyer, "N/A"),
 		orDefault(req.Amount, "N/A"),
 		orDefault(req.Deadline, "Non précisée"),
+		time.Now().Format("2006-01-02"),
 	)
 
 	description := "Non disponible"

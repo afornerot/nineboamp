@@ -48,6 +48,9 @@ class CompetenceSuggesterTest extends TestCase
                     $this->stringContains('MAX:8'),
                 ),
                 'SYSTEME',
+                $this->anything(),
+                $this->anything(),
+                180,
             )
             ->willReturn('{"suggestions":[]}');
 

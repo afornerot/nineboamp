@@ -64,6 +64,12 @@ class CompetenceController extends AbstractController
             return $this->redirectToRoute('app_admin_competence');
         }
 
+        // Libérer le verrou de session pendant l'appel LLM, pour ne pas bloquer
+        // les autres requêtes de l'utilisateur ; la session se rouvre d'elle-même
+        // à la prochaine écriture (suggestions, message flash).
+        $request->getSession()->save();
+        set_time_limit(240);
+
         try {
             $suggestions = [];
             foreach ($suggester->suggest() as $suggestion) {

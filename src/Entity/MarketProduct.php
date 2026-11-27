@@ -12,7 +12,7 @@ class MarketProduct
     #[ORM\Column]
     private ?int $id = null;
 
-    #[ORM\ManyToOne(targetEntity: Market::class)]
+    #[ORM\ManyToOne(targetEntity: Market::class, inversedBy: 'marketProducts')]
     #[ORM\JoinColumn(nullable: false, onDelete: 'CASCADE')]
     private ?Market $market = null;
 

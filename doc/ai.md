@@ -154,6 +154,8 @@ Les prompts sont stockés dans `src/DataFixtures/data/scoring/*.md` (plus de BDD
 | `report.user.md` | Données du marché pour le rapport (placeholders `{{metadata}}`, `{{description}}`, `{{products}}`, `{{catalogue}}`, `{{chatHistory}}`) |
 | `competence.suggest.system.md` | Rôle LLM pour la suggestion de compétences depuis le catalogue (JSON strict) |
 | `competence.suggest.user.md` | Données de la suggestion (placeholders `{{competences}}`, `{{catalogue}}`, `{{max}}`) |
+| `product.generate.system.md` | Rôle LLM, règles et gabarit de la fiche produit pour la réécriture par l'IA (réponse en blocs `===DESCRIPTION===`, `===MOTS-CLES===`, `===SECTEURS===`, `===FICHE===`) |
+| `product.generate.user.md` | Contenu du formulaire produit à réécrire (placeholders `{{name}}`, `{{description}}`, `{{keywords}}`, `{{sectors}}`, `{{instruction}}`, `{{fiche}}`) |
 | `extract.system.md`, `extract.user.md` | Extraction des mots-clés, secteurs et description d'un produit (placeholders `{{tasks}}`, `{{schema}}`, `{{fiche}}`) |
 
 Le catalogue est rendu par l'agent sous la forme `- **nom** (ID: 83)` : le LLM
@@ -191,6 +193,26 @@ faisons pas ») n'est plus écrit dans les prompts : il est géré en base (enti
   l'appel LLM direct de PHP ; le scoring et le rapport échouent avec ce message.
 - Le catalogue envoyé pour la suggestion est borné à 40 000 caractères : les
   extraits de fiches raccourcissent quand le nombre de produits augmente.
+
+### Réécriture d'une fiche produit par l'IA
+
+Dans le formulaire produit (`/user/product`), le bouton « Générer avec l'IA »
+envoie le contenu saisi et la consigne facultative à
+`ProductSheetGenerator` (`POST /user/product/generate`). L'IA réécrit la fiche
+selon le gabarit de `product.generate.system.md` et propose description,
+mots-clés et secteurs.
+
+- Rien n'est enregistré : la proposition remplace le contenu du formulaire,
+  « Annuler la proposition » rétablit la saisie d'origine, et seul « Valider »
+  enregistre.
+- L'IA n'ajoute aucune information : ce qui manque pour une section est signalé
+  par une puce « À compléter : … », à remplir à la main ou par une nouvelle
+  génération avec une consigne.
+- La consigne n'est pas enregistrée avec le produit.
+- L'appel est synchrone (30 à 40 s constatées, délai maximal de 180 s).
+- Avec un modèle « à raisonnement », la réflexion compte dans `max_tokens` :
+  une valeur trop basse donne une réponse vide (« L'IA n'a pas répondu »). Le
+  prompt est réglé à 24 000 ; l'ajuster dans son en-tête si besoin.
 
 Les prompts supportent un frontmatter YAML minimal :
 

@@ -14,6 +14,11 @@ class AiService
 
     private const MAX_RETRIES = 3;
 
+    /**
+     * Délai d'attente (s) d'une réponse du LLM, sauf demande contraire de l'appelant.
+     */
+    private const DEFAULT_TIMEOUT = 60;
+
     public function __construct(
         #[Autowire(param: 'aiProvider')]
         private string $provider,
@@ -33,6 +38,7 @@ class AiService
         ?string $system = null,
         float $temperature = 0.7,
         int $maxTokens = 1024,
+        int $timeout = self::DEFAULT_TIMEOUT,
     ): string {
         $messages = [];
 
@@ -47,7 +53,7 @@ class AiService
             'messages' => $messages,
             'temperature' => max(0.0, min(self::MAX_TEMPERATURE, $temperature)),
             'max_tokens' => max(1, min(self::MAX_TOKENS, $maxTokens)),
-        ]);
+        ], $timeout);
 
         if (isset($data['error'])) {
             $message = is_string($data['error']) ? $data['error'] : (string) ($data['error']['message'] ?? 'erreur inconnue');
@@ -132,7 +138,7 @@ class AiService
      *
      * @return array<string, mixed>
      */
-    private function request(string $endpoint, array $payload): array
+    private function request(string $endpoint, array $payload, int $timeout = self::DEFAULT_TIMEOUT): array
     {
         for ($attempt = 1; $attempt <= self::MAX_RETRIES; ++$attempt) {
             try {
@@ -141,7 +147,7 @@ class AiService
                         'Authorization' => 'Bearer '.$this->apiKey,
                     ],
                     'json' => $payload,
-                    'timeout' => 60,
+                    'timeout' => $timeout,
                 ]);
             } catch (\Throwable $e) {
                 $this->logger->error('AiService: appels HTTP IA en échec', ['endpoint' => $endpoint, 'error' => $e->getMessage()]);

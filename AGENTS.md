@@ -27,6 +27,7 @@ PHP appelle l'agent par `AgentJobClient` (`http://127.0.0.1:8000`). L'agent rapp
 | Chargement des prompts | PHP : `PromptLoader` ; Go : `agent-go/internal/prompts/prompts.go` |
 | Appel LLM direct (synchrone) | `AiService::ask()` / `askMessages()` |
 | Extraction mots-clés / secteurs / description | `ProductMetadataExtractor` |
+| Réécriture d'une fiche produit par l'IA | `ProductSheetGenerator`, `ProductController::generate()` |
 | Détection et scoring BOAMP | `BoampFinderService`, `ScoringAgentService`, `agent-go/internal/flow/score.go` |
 | Rapport de positionnement | `MarketReportService`, `agent-go/internal/flow/report.go` |
 | Chat | `MarketChatController`, `AgentService`, `agent-go/internal/flow/chat.go` |
@@ -46,6 +47,7 @@ Les prompts sont des fichiers relus à chaque appel, pas des données en base.
 | `report.system.md` | agent Go (système du rapport) | `{{competences}}` |
 | `report.user.md` | agent Go | `{{metadata}}`, `{{description}}`, `{{products}}`, `{{catalogue}}`, `{{chatHistory}}` |
 | `chat.context.md` | PHP (`MarketChatController`) et agent Go | `{{competences}}`, `{{metadata}}`, `{{description}}`, `{{products}}`, `{{documents}}` |
+| `product.generate.system.md`, `product.generate.user.md` | PHP (`ProductSheetGenerator`) | `{{name}}`, `{{description}}`, `{{keywords}}`, `{{sectors}}`, `{{instruction}}`, `{{fiche}}` |
 | `competence.suggest.system.md`, `competence.suggest.user.md` | PHP (`CompetenceSuggester`) | `{{competences}}`, `{{catalogue}}`, `{{max}}` |
 | `extract.system.md`, `extract.user.md` | PHP (`ProductMetadataExtractor`) | `{{tasks}}`, `{{schema}}`, `{{fiche}}` |
 
@@ -55,7 +57,9 @@ Les prompts sont des fichiers relus à chaque appel, pas des données en base.
 - Quand la table `competence` est vide, `app:init` recrée les valeurs par défaut de `CompetenceSeeder::DEFAULTS` à chaque démarrage.
 - Sur le chemin de l'agent Go, `chat.context.md` n'est substitué que pour `{{competences}}` : ses autres placeholders (`{{metadata}}`…) partent tels quels, les informations du marché étant ajoutées au message utilisateur par PHP.
 - Les placeholders sont remplacés par simple substitution de chaîne. Un placeholder inconnu du code reste tel quel dans le prompt envoyé au LLM.
-- `ProductMetadataExtractor` ne lit que les 4 000 premiers caractères de la fiche ; le catalogue du rapport tronque la description à 150 caractères.
+- `ProductMetadataExtractor` lit les 12 000 premiers caractères de la fiche ; le catalogue du rapport tronque la description à 300 caractères.
+- Le gabarit de fiche produit vit dans `product.generate.system.md`. Le plan conseillé affiché sous le champ « Fiche » de `templates/product/edit.html.twig` en reprend les titres : modifier les deux ensemble.
+- Le modèle configuré peut être « à raisonnement » : sa réflexion compte dans `max_tokens`, et une limite trop basse donne une réponse vide sans erreur HTTP. Prévoir large (16 000 à 24 000) pour un prompt qui produit un texte long.
 - L'IA ne remplace jamais un champ produit déjà rempli (mots-clés, secteurs, description) : il faut le vider pour qu'elle le régénère.
 
 ## Lancer et vérifier

@@ -8,9 +8,11 @@ use App\Entity\Product;
 use App\Form\ProductType;
 use App\Repository\ProductRepository;
 use App\Service\ProductMetadataExtractor;
+use App\Service\ProductSheetGenerator;
 use Bnine\FilesBundle\Service\FileService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
@@ -113,6 +115,34 @@ class ProductController extends AbstractController
             'mode' => 'update',
             'product' => $product,
         ]);
+    }
+
+    /**
+     * Réécriture du formulaire par l'IA. Ne lit ni n'écrit aucun produit : le
+     * contenu saisi arrive dans la requête et la proposition repart en JSON,
+     * à relire dans le formulaire avant d'enregistrer.
+     */
+    #[Route('/user/product/generate', name: 'app_product_generate', methods: ['POST'])]
+    public function generate(Request $request, ProductSheetGenerator $generator): JsonResponse
+    {
+        if (!$this->isCsrfTokenValid('generate-product', (string) $request->request->get('_csrf_token'))) {
+            return new JsonResponse(['error' => 'Jeton de sécurité expiré : rechargez la page.'], Response::HTTP_FORBIDDEN);
+        }
+
+        // La génération d'une fiche entière peut dépasser le délai PHP par défaut.
+        set_time_limit(240);
+
+        try {
+            return new JsonResponse($generator->generate([
+                'name' => $request->request->getString('name'),
+                'description' => $request->request->getString('description'),
+                'keywords' => $request->request->getString('keywords'),
+                'sectors' => $request->request->getString('sectors'),
+                'fiche' => $request->request->getString('fiche'),
+            ], $request->request->getString('instruction')));
+        } catch (\RuntimeException $e) {
+            return new JsonResponse(['error' => $e->getMessage()], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
     }
 
     #[Route('/user/product/delete/{id}', name: 'app_product_delete', methods: ['POST'])]

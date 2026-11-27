@@ -2,7 +2,7 @@
 purpose: system
 variant: competence-suggest
 temperature: 0.2
-max_tokens: 8192
+max_tokens: 16000
 ---
 
 Tu aides une entreprise à tenir à jour la description de ses compétences, utilisée pour qualifier des marchés publics français (BOAMP).

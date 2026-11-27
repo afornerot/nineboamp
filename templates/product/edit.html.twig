@@ -32,6 +32,24 @@
                         <small class="form-text text-muted">Si vide, les secteurs seront extraits automatiquement de la fiche via l'IA.</small><br>
                     </div>
                 </div>
+
+                <div class="card mt-3">
+                    <div class="card-header">Réécriture par l'IA</div>
+                    <div class="card-body">
+                        <p class="text-muted">
+                            L'IA réécrit la fiche selon le plan conseillé, à partir de ce qui est saisi ici, et propose une description,
+                            des mots-clés et des secteurs. Elle n'ajoute aucune information : ce qui manque est signalé par « À compléter ».
+                            Rien n'est enregistré tant que vous n'avez pas validé le formulaire.
+                        </p>
+                        {{ form_row(form.aiInstruction) }}
+                        <button type="button" class="btn btn-outline-primary" id="product-generate"
+                                data-url="{{ path('app_product_generate') }}" data-token="{{ csrf_token('generate-product') }}">
+                            <i class="fas fa-magic"></i> Générer avec l'IA
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary ms-1" id="product-generate-undo" hidden>Annuler la proposition</button>
+                        <div class="mt-2" id="product-generate-status" role="status"></div>
+                    </div>
+                </div>
             </div>
 
             <div class="col-md-6">
@@ -39,6 +57,10 @@
                     <div class="card-header">Fiche produit (Markdown)</div>
                     <div class="card-body">
                         {{ form_row(form.fiche) }}
+                        <small class="form-text text-muted">
+                            Plan conseillé : En bref · Besoins couverts · Fonctionnalités principales · Acheteurs publics visés ·
+                            Déploiement et prérequis · Prestations associées · Ce que le produit ne fait pas · Vocabulaire des marchés.
+                        </small>
                     </div>
                 </div>
             </div>
@@ -52,6 +74,73 @@
     <script>
         $(document).ready(function() {
             $("#product_name").focus();
+
+            // Champs du formulaire remplacés par la proposition de l'IA.
+            const fields = {
+                description: document.getElementById('product_description'),
+                keywords: document.getElementById('product_keywords'),
+                sectors: document.getElementById('product_sectors'),
+                fiche: document.getElementById('product_fiche'),
+            };
+            const generate = document.getElementById('product-generate');
+            const undo = document.getElementById('product-generate-undo');
+            const status = document.getElementById('product-generate-status');
+            const label = generate.innerHTML;
+            let previous = null;
+
+            function say(text, cssClass) {
+                status.className = 'mt-2 ' + cssClass;
+                status.textContent = text;
+            }
+
+            generate.addEventListener('click', function () {
+                const body = new URLSearchParams({
+                    _csrf_token: generate.dataset.token,
+                    name: document.getElementById('product_name').value,
+                    instruction: document.getElementById('product_aiInstruction').value,
+                });
+                Object.keys(fields).forEach(function (key) { body.set(key, fields[key].value); });
+
+                generate.disabled = true;
+                generate.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Génération en cours…';
+                say('La réécriture d\'une fiche prend jusqu\'à deux minutes.', 'text-muted');
+
+                fetch(generate.dataset.url, {method: 'POST', body: body, headers: {'X-Requested-With': 'XMLHttpRequest'}})
+                    .then(function (response) {
+                        return response.json().then(
+                            function (data) { return {ok: response.ok, data: data}; },
+                            function () { return {ok: false, data: {error: 'Réponse inattendue du serveur (HTTP ' + response.status + ').'}}; }
+                        );
+                    })
+                    .then(function (result) {
+                        if (!result.ok || result.data.error) {
+                            say(result.data.error || 'La génération a échoué.', 'text-danger');
+                            return;
+                        }
+                        // Une seule sauvegarde : « Annuler » revient à ce qui était saisi avant la première proposition.
+                        if (null === previous) {
+                            previous = {};
+                            Object.keys(fields).forEach(function (key) { previous[key] = fields[key].value; });
+                        }
+                        Object.keys(fields).forEach(function (key) {
+                            if (result.data[key]) { fields[key].value = result.data[key]; }
+                        });
+                        undo.hidden = false;
+                        say('Proposition insérée dans le formulaire. Relisez-la, puis validez pour enregistrer.', 'text-success');
+                    })
+                    .catch(function () { say('Serveur injoignable ou délai dépassé.', 'text-danger'); })
+                    .finally(function () {
+                        generate.disabled = false;
+                        generate.innerHTML = label;
+                    });
+            });
+
+            undo.addEventListener('click', function () {
+                Object.keys(fields).forEach(function (key) { fields[key].value = previous[key]; });
+                previous = null;
+                undo.hidden = true;
+                say('Contenu d\'origine rétabli.', 'text-muted');
+            });
         });
     </script>
 {% endblock %}

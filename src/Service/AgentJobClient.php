@@ -58,10 +58,13 @@ class AgentJobClient
      */
     public function start(string $kind, array $payload): array
     {
-        if (array_key_exists(self::CAPABILITY_COMPANY_CONTEXT, $payload) && !$this->supportsCompanyContext()) {
-            // Sans cela, l'ancien agent ignorerait le champ et enverrait le
-            // placeholder {{competences}} tel quel au LLM, sans aucune erreur.
-            throw $this->startFailed($kind, $payload, sprintf('job de %s non démarré : l\'agent IA est antérieur au code de l\'application (compétences de l\'entreprise non prises en charge). Reconstruire l\'image : docker compose up -d --build nineboamp', self::LABELS[$kind]));
+        if (array_key_exists(self::CAPABILITY_COMPANY_CONTEXT, $payload)) {
+            // Sans cette vérification, un agent plus ancien ignorerait le champ et
+            // enverrait le placeholder {{competences}} tel quel au LLM, sans erreur.
+            $problem = $this->companyContextProblem();
+            if (null !== $problem) {
+                throw $this->startFailed($kind, $payload, sprintf('job de %s non démarré : %s', self::LABELS[$kind], $problem));
+            }
         }
 
         try {
@@ -187,25 +190,33 @@ class AgentJobClient
     }
 
     /**
-     * L'agent annonce-t-il la prise en charge du champ company_context ?
-     * Un agent injoignable ou plus ancien répond non. Seul le oui est mémorisé :
-     * l'agent peut être remplacé pendant la vie d'un processus long (cron).
+     * Vérifie que l'agent prend en charge le champ company_context.
+     * Seul le succès est mémorisé : l'agent peut être remplacé ou redémarré
+     * pendant la vie d'un processus long (cron).
+     *
+     * @return string|null null si tout va bien, sinon la raison, en distinguant
+     *                     un agent injoignable d'un agent trop ancien
      */
-    private function supportsCompanyContext(): bool
+    private function companyContextProblem(): ?string
     {
         if ($this->companyContextSupported) {
-            return true;
+            return null;
         }
 
         try {
             $health = $this->httpClient->request('GET', self::AGENT_URL.'/health', ['timeout' => 5])->toArray();
-        } catch (\Throwable) {
-            return false;
+        } catch (\Throwable $e) {
+            return 'agent IA injoignable ('.$e->getMessage().')';
         }
 
         $capabilities = $health['capabilities'] ?? [];
+        if (!is_array($capabilities) || !in_array(self::CAPABILITY_COMPANY_CONTEXT, $capabilities, true)) {
+            return 'l\'agent IA est antérieur au code de l\'application (compétences de l\'entreprise non prises en charge). Reconstruire l\'image : docker compose up -d --build nineboamp';
+        }
 
-        return $this->companyContextSupported = is_array($capabilities) && in_array(self::CAPABILITY_COMPANY_CONTEXT, $capabilities, true);
+        $this->companyContextSupported = true;
+
+        return null;
     }
 
     /**

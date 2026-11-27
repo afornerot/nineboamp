@@ -189,7 +189,8 @@ faisons pas ») n'est plus écrit dans les prompts : il est géré en base (enti
   prompt. `AgentJobClient` s'en protège : il vérifie que `GET /health` annonce
   la capacité `company_context` et refuse sinon de démarrer le job, avec un
   message demandant de reconstruire l'image
-  (`docker compose up -d --build nineboamp`). Le chat se replie alors sur
+  (`docker compose up -d --build nineboamp`). Un agent simplement injoignable
+  donne un message distinct (« agent IA injoignable »). Le chat se replie alors sur
   l'appel LLM direct de PHP ; le scoring et le rapport échouent avec ce message.
 - Le catalogue envoyé pour la suggestion est borné à 40 000 caractères : les
   extraits de fiches raccourcissent quand le nombre de produits augmente.

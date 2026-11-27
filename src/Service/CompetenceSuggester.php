@@ -20,6 +20,10 @@ class CompetenceSuggester
     private const MAX_REASON_LENGTH = 300;
     private const MAX_FICHE_LENGTH = 2500;
     /**
+     * Un modèle à raisonnement dépasse le délai par défaut d'AiService sur un catalogue entier.
+     */
+    private const TIMEOUT = 180;
+    /**
      * Taille maximale du catalogue dans le prompt, tous produits confondus.
      */
     private const MAX_CATALOGUE_LENGTH = 40000;
@@ -74,7 +78,7 @@ class CompetenceSuggester
         }
 
         $meta = $this->promptLoader->load('competence.suggest.system');
-        $response = $this->ai->ask($user, $system, $meta?->getTemperature() ?? 0.2, $meta?->getMaxTokens() ?? 4096);
+        $response = $this->ai->ask($user, $system, $meta?->getTemperature() ?? 0.2, $meta?->getMaxTokens() ?? 16000, self::TIMEOUT);
         if ('' === trim($response)) {
             throw new \RuntimeException("L'IA n'a pas répondu. Vérifiez la configuration IA et les logs.");
         }

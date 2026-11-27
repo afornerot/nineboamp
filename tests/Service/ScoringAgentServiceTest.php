@@ -61,6 +61,19 @@ class ScoringAgentServiceTest extends TestCase
         $this->assertSame(1, $client->getRequestsCount(), 'aucun job ne doit être envoyé à un agent obsolète');
     }
 
+    public function testStartScoringJobTellsAnUnreachableAgentFromAnOutdatedOne(): void
+    {
+        $client = new MockHttpClient([new MockResponse('', ['error' => 'Connection refused'])]);
+
+        try {
+            $this->scoringAgent($client)->startScoringJob(1, '26-1', 't', 'b', 'd', '1000', null, []);
+            $this->fail('un agent injoignable doit faire échouer le démarrage');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('agent IA injoignable (Connection refused', $e->getMessage());
+            $this->assertStringNotContainsString('--build', $e->getMessage());
+        }
+    }
+
     private function scoringAgent(MockHttpClient $client): ScoringAgentService
     {
         $companyContext = $this->createStub(CompanyContextBuilder::class);

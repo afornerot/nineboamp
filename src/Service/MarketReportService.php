@@ -19,6 +19,7 @@ class MarketReportService
         private AgentJobClient $agentJobs,
         private MarketChatMessageRepository $chatRepo,
         private ProductRepository $productRepository,
+        private CompanyContextBuilder $companyContext,
     ) {
     }
 
@@ -90,6 +91,7 @@ class MarketReportService
             'products' => $products,
             'catalogue' => $catalogue,
             'chat_history' => $chatHistory,
+            AgentJobClient::CAPABILITY_COMPANY_CONTEXT => $this->companyContext->build(),
         ];
     }
 

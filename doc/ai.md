@@ -147,14 +147,50 @@ Les prompts sont stockés dans `src/DataFixtures/data/scoring/*.md` (plus de BDD
 
 | Fichier | Rôle |
 |---------|------|
-| `chat.context.md` | System prompt pour le chat agenté (avec placeholders `{{metadata}}`, `{{description}}`, etc.) |
-| `scoring.role.md` | Rôle LLM pour le scoring (contexte entreprise + chapitre "ce que nous ne faisons pas") |
+| `chat.context.md` | System prompt pour le chat agenté (placeholders `{{competences}}`, `{{metadata}}`, `{{description}}`, `{{products}}`, `{{documents}}`) |
+| `scoring.role.md` | Rôle LLM pour le scoring (contexte entreprise via `{{competences}}`) |
 | `scoring.user.md` | Prompt de scoring marché par marché (JSON strict, placeholders `{{idweb}}`, `{{title}}`, `{{buyer}}`, `{{description}}`, `{{amount}}`, `{{deadline}}`, `{{catalogue}}`) |
+| `report.system.md` | Rôle LLM et plan du rapport de positionnement (contexte entreprise via `{{competences}}`) |
+| `report.user.md` | Données du marché pour le rapport (placeholders `{{metadata}}`, `{{description}}`, `{{products}}`, `{{catalogue}}`, `{{chatHistory}}`) |
+| `competence.suggest.system.md` | Rôle LLM pour la suggestion de compétences depuis le catalogue (JSON strict) |
+| `competence.suggest.user.md` | Données de la suggestion (placeholders `{{competences}}`, `{{catalogue}}`, `{{max}}`) |
+| `extract.system.md`, `extract.user.md` | Extraction des mots-clés, secteurs et description d'un produit (placeholders `{{tasks}}`, `{{schema}}`, `{{fiche}}`) |
 
 Le catalogue est rendu par l'agent sous la forme `- **nom** (ID: 83)` : le LLM
 reprend cet `id` dans chaque entrée `products[]`, et PHP associe le produit par
 ID (`BoampFinderService::applyScoringResult()`), à défaut par nom exact. Une
 entrée dont le produit est introuvable est ignorée et journalisée en `warning`.
+
+### Compétences de l'entreprise (`{{competences}}`)
+
+Le contexte entreprise (présentation, savoir-faire, offre, « ce que nous ne
+faisons pas ») n'est plus écrit dans les prompts : il est géré en base (entité
+`Competence`) depuis `/admin/competence` et inséré à la place de
+`{{competences}}` dans `scoring.role.md`, `report.system.md` et
+`chat.context.md`.
+
+- `CompanyContextBuilder::build()` rend les compétences actives en Markdown,
+  par catégorie puis par ordre. L'écran d'administration en affiche l'aperçu.
+- PHP transmet ce texte à l'agent dans le champ `company_context` des requêtes
+  `/chat`, `/score` et `/report` ; l'agent le substitue dans le prompt système.
+  Une modification s'applique donc dès le prochain appel, sans redémarrage.
+- Si la table est vide au démarrage, `app:init` crée les compétences par défaut
+  (`CompetenceSeeder::DEFAULTS`), y compris sur une base déjà initialisée.
+  Pour retirer une compétence sans qu'elle revienne, la désactiver ou garder au
+  moins une ligne dans la table.
+- Le bouton « Suggérer depuis le catalogue » (`CompetenceSuggester`, prompts
+  `competence.suggest.system.md` et `competence.suggest.user.md`) demande à
+  l'IA des savoir-faire, offres ou exclusions que les fiches produits
+  établissent et qui manquent. Rien n'est enregistré : chaque proposition ouvre
+  le formulaire prérempli, à relire et valider.
+- Un agent antérieur à ce champ laisserait `{{competences}}` tel quel dans le
+  prompt. `AgentJobClient` s'en protège : il vérifie que `GET /health` annonce
+  la capacité `company_context` et refuse sinon de démarrer le job, avec un
+  message demandant de reconstruire l'image
+  (`docker compose up -d --build nineboamp`). Le chat se replie alors sur
+  l'appel LLM direct de PHP ; le scoring et le rapport échouent avec ce message.
+- Le catalogue envoyé pour la suggestion est borné à 40 000 caractères : les
+  extraits de fiches raccourcissent quand le nombre de produits augmente.
 
 Les prompts supportent un frontmatter YAML minimal :
 

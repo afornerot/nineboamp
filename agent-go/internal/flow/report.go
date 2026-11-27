@@ -20,7 +20,7 @@ func (s *Service) Report(ctx context.Context, req ReportRequest) (status string,
 	}()
 
 	messages := []llm.Message{
-		llm.NewMessage(llm.RoleSystem, s.prompts.ReportSystem()),
+		llm.NewMessage(llm.RoleSystem, withCompanyContext(s.prompts.ReportSystem(), req.CompanyContext)),
 		llm.NewMessage(llm.RoleUser, buildReportUserPrompt(s.prompts.ReportUser(), req)),
 	}
 

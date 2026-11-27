@@ -33,6 +33,9 @@ type ChatRequest struct {
 	Message      string           `json:"message"`
 	History      []HistoryMessage `json:"history"`
 	ResetSession bool             `json:"reset_session"`
+	// CompanyContext : compétences de l'entreprise rendues par PHP depuis la
+	// base, substituées à {{competences}} dans le prompt système.
+	CompanyContext string `json:"company_context"`
 }
 
 // ScoreRequest est le corps de POST /score.
@@ -45,6 +48,8 @@ type ScoreRequest struct {
 	Amount      string           `json:"amount"`
 	Deadline    string           `json:"deadline"`
 	Products    []map[string]any `json:"products"`
+	// CompanyContext : voir ChatRequest.
+	CompanyContext string `json:"company_context"`
 }
 
 // ReportRequest est le corps de POST /report.
@@ -58,6 +63,20 @@ type ReportRequest struct {
 	Products    []map[string]any `json:"products"`
 	Catalogue   string           `json:"catalogue"`
 	ChatHistory []HistoryMessage `json:"chat_history"`
+	// CompanyContext : voir ChatRequest.
+	CompanyContext string `json:"company_context"`
+}
+
+// competencesPlaceholder est le placeholder des prompts système remplacé par
+// les compétences de l'entreprise (gérées en base côté PHP).
+const competencesPlaceholder = "{{competences}}"
+
+// withCompanyContext substitue {{competences}} dans un prompt système. Sans
+// contexte fourni (PHP antérieur au champ company_context), le placeholder est
+// remplacé par une mention neutre plutôt que de partir tel quel au LLM.
+func withCompanyContext(prompt, companyContext string) string {
+	return strings.ReplaceAll(prompt, competencesPlaceholder,
+		orDefault(strings.TrimSpace(companyContext), "Compétences de l'entreprise non renseignées."))
 }
 
 // ChatResult est le payload result d'un job chat.

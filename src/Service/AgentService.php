@@ -9,6 +9,7 @@ class AgentService
 {
     public function __construct(
         private AgentJobClient $agentJobs,
+        private CompanyContextBuilder $companyContext,
     ) {
     }
 
@@ -25,6 +26,7 @@ class AgentService
                 'message' => $message,
                 'history' => $history,
                 'reset_session' => $resetSession,
+                AgentJobClient::CAPABILITY_COMPANY_CONTEXT => $this->companyContext->build(),
             ])['job_id'];
         } catch (\RuntimeException) {
             return null;

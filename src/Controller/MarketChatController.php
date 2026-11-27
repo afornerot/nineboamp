@@ -10,6 +10,7 @@ use App\Repository\MarketRepository;
 use App\Service\AgentService;
 use App\Service\AiService;
 use App\Service\AmoxtliService;
+use App\Service\CompanyContextBuilder;
 use App\Service\PromptLoader;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -32,6 +33,7 @@ class MarketChatController extends AbstractController
         private AmoxtliService $amoxtliService,
         private AiService $aiService,
         private PromptLoader $promptLoader,
+        private CompanyContextBuilder $companyContext,
         private ?AgentService $agentService = null,
         private ?\Psr\Log\LoggerInterface $logger = null,
     ) {
@@ -391,7 +393,7 @@ class MarketChatController extends AbstractController
      */
     private function buildMessages(Market $market, array $history, array $context, string $currentQuery): array
     {
-        $template = $this->promptLoader->renderSystem('chat.context');
+        $template = $this->companyContext->apply($this->promptLoader->renderSystem('chat.context'));
 
         $metadata = "- Titre: ".$market->getTitle()."\n"
             ."- Acheteur: ".($market->getBuyer() ?: 'N/A')."\n"
@@ -553,7 +555,7 @@ class MarketChatController extends AbstractController
      */
     private function buildAnswerMessages(Market $market, array $history, array $context, string $currentQuery): array
     {
-        $template = $this->promptLoader->renderSystem('chat.context');
+        $template = $this->companyContext->apply($this->promptLoader->renderSystem('chat.context'));
 
         $metadata = "- Titre: " . $market->getTitle() . "\n"
             . "- Acheteur: " . ($market->getBuyer() ?: 'N/A') . "\n"

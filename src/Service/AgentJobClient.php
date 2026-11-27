@@ -15,6 +15,14 @@ class AgentJobClient
     public const SCORE = 'score';
     public const REPORT = 'report';
 
+    /**
+     * Champ des requêtes portant les compétences de l'entreprise, et nom de la
+     * capacité correspondante annoncée par GET /health.
+     */
+    public const CAPABILITY_COMPANY_CONTEXT = 'company_context';
+
+    private bool $companyContextSupported = false;
+
     private const LABELS = [
         self::CHAT => 'chat',
         self::SCORE => 'scoring',
@@ -50,6 +58,12 @@ class AgentJobClient
      */
     public function start(string $kind, array $payload): array
     {
+        if (array_key_exists(self::CAPABILITY_COMPANY_CONTEXT, $payload) && !$this->supportsCompanyContext()) {
+            // Sans cela, l'ancien agent ignorerait le champ et enverrait le
+            // placeholder {{competences}} tel quel au LLM, sans aucune erreur.
+            throw $this->startFailed($kind, $payload, sprintf('job de %s non démarré : l\'agent IA est antérieur au code de l\'application (compétences de l\'entreprise non prises en charge). Reconstruire l\'image : docker compose up -d --build nineboamp', self::LABELS[$kind]));
+        }
+
         try {
             $response = $this->httpClient->request('POST', self::AGENT_URL.'/'.$kind, [
                 'json' => $payload,
@@ -170,6 +184,28 @@ class AgentJobClient
         $this->logger->warning('AgentJobClient: timeout waiting for result', ['kind' => $kind, 'job_id' => $jobId, 'timeout' => $timeoutSeconds]);
 
         return new AgentJobResult(AgentJobResult::TIMEOUT, error: sprintf('aucun statut final de l\'agent après %d s (job perdu ou agent bloqué)', $timeoutSeconds));
+    }
+
+    /**
+     * L'agent annonce-t-il la prise en charge du champ company_context ?
+     * Un agent injoignable ou plus ancien répond non. Seul le oui est mémorisé :
+     * l'agent peut être remplacé pendant la vie d'un processus long (cron).
+     */
+    private function supportsCompanyContext(): bool
+    {
+        if ($this->companyContextSupported) {
+            return true;
+        }
+
+        try {
+            $health = $this->httpClient->request('GET', self::AGENT_URL.'/health', ['timeout' => 5])->toArray();
+        } catch (\Throwable) {
+            return false;
+        }
+
+        $capabilities = $health['capabilities'] ?? [];
+
+        return $this->companyContextSupported = is_array($capabilities) && in_array(self::CAPABILITY_COMPANY_CONTEXT, $capabilities, true);
     }
 
     /**

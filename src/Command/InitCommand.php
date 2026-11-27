@@ -3,6 +3,7 @@
 namespace App\Command;
 
 use App\Repository\UserRepository;
+use App\Service\CompetenceSeeder;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\ArrayInput;
@@ -17,7 +18,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 class InitCommand extends Command
 {
-    public function __construct(private UserRepository $userRepository)
+    public function __construct(private UserRepository $userRepository, private CompetenceSeeder $competenceSeeder)
     {
         parent::__construct();
     }
@@ -33,6 +34,14 @@ class InitCommand extends Command
         $io->title('APP:INIT');
         $io->text('Initialisation of the app');
         $io->text('');
+
+        // Indépendant des fixtures : une base initialisée avant le passage des
+        // compétences en base n'en contient aucune, et les prompts n'embarquent
+        // plus le contexte entreprise en dur.
+        $seeded = $this->competenceSeeder->seedIfEmpty();
+        if ($seeded > 0) {
+            $io->text(sprintf('> %d compétences par défaut créées', $seeded));
+        }
 
         // app:init tourne à chaque démarrage du conteneur : recharger les
         // fixtures recréerait les produits et crons supprimés depuis l'UI et

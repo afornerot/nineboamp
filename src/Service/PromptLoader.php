@@ -184,11 +184,13 @@ class PromptLoader
      */
     private function applyVars(string $template, array $vars): string
     {
-        $result = $template;
+        // Un seul passage (strtr) : un « {{fiche}} » présent dans une valeur
+        // saisie par l'utilisateur n'est pas développé à son tour.
+        $map = [];
         foreach ($vars as $key => $value) {
-            $result = str_replace('{{' . $key . '}}', (string) $value, $result);
+            $map['{{'.$key.'}}'] = (string) $value;
         }
 
-        return $result;
+        return strtr($template, $map);
     }
 }

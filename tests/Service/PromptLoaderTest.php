@@ -55,6 +55,15 @@ class PromptLoaderTest extends TestCase
         $this->assertSame('scoring', $prompt->getMetadataValue('variant'));
     }
 
+    public function testRenderDoesNotExpandPlaceholdersComingFromValues(): void
+    {
+        $this->writePrompt('gen.user.md', "---\n---\nConsigne: {{instruction}}\nFiche: {{fiche}}\n");
+
+        $rendered = $this->buildLoader()->renderUser('gen.user', ['instruction' => 'voir {{fiche}}', 'fiche' => 'SECRET']);
+
+        $this->assertSame("Consigne: voir {{fiche}}\nFiche: SECRET", trim($rendered));
+    }
+
     public function testRenderReplacesPlaceholders(): void
     {
         $this->writePrompt('scoring.user.md', "---\n---\nIDWEB: {{idweb}}\nTitre: {{title}}\n");

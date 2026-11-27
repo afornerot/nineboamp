@@ -9,7 +9,9 @@ class ProductMetadataExtractor
 {
     private const MAX_KEYWORDS = 10;
     private const MAX_SECTORS = 5;
-    private const MAX_FICHE_LENGTH = 4000;
+    // Une fiche au gabarit fait 3 000 à 6 000 caractères et se termine par le
+    // vocabulaire des marchés : la lire en entier, les plaquettes plus longues en large part.
+    private const MAX_FICHE_LENGTH = 12000;
     private const MAX_KEYWORD_LENGTH = 30;
     private const MAX_DESCRIPTION_LENGTH = 300;
 
@@ -222,7 +224,8 @@ class ProductMetadataExtractor
                 continue;
             }
             $v = trim($v);
-            $v = preg_replace('/^[\s\-•*\d.]+/u', '', $v) ?? $v;
+            // Seulement les marqueurs de liste : « 3D » ou « .NET » restent entiers.
+            $v = preg_replace('/^\s*(?:[-•*]\s*|\d+[.)]\s+)/u', '', $v) ?? $v;
             $v = trim($v);
             if ('' === $v || mb_strlen($v) > self::MAX_KEYWORD_LENGTH) {
                 continue;

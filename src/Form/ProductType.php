@@ -3,6 +3,7 @@
 namespace App\Form;
 
 use App\Entity\Product;
+use App\Service\ProductSheetGenerator;
 use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\SubmitType;
 use Symfony\Component\Form\Extension\Core\Type\TextareaType;
@@ -35,6 +36,17 @@ class ProductType extends AbstractType
                 'label' => 'Fiche produit (Markdown)',
                 'required' => false,
                 'attr' => ['rows' => 20, 'class' => 'markdown-editor'],
+            ])
+            // Non enregistré : consigne lue par le bouton « Générer avec l'IA ».
+            ->add('aiInstruction', TextareaType::class, [
+                'label' => 'Consigne pour l\'IA (facultatif)',
+                'mapped' => false,
+                'required' => false,
+                'attr' => [
+                    'rows' => 3,
+                    'maxlength' => ProductSheetGenerator::MAX_INSTRUCTION_LENGTH,
+                    'placeholder' => 'Ce qui ne va pas ou ce qu\'il faut ajouter. Exemple : « trop commercial », « préciser que l\'hébergement est possible chez nous »…',
+                ],
             ])
         ;
 

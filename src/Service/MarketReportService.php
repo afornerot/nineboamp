@@ -103,7 +103,8 @@ class MarketReportService
                 "- %s (ID: %d) — %s",
                 $product->getName() ?? '?',
                 $product->getId() ?? 0,
-                mb_substr($product->getDescription() ?? '', 0, 150)
+                // 300 : longueur maximale d'une description courte de produit.
+                mb_substr($product->getDescription() ?? '', 0, 300)
             );
         }
 

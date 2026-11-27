@@ -107,6 +107,10 @@
 
                 fetch(generate.dataset.url, {method: 'POST', body: body, headers: {'X-Requested-With': 'XMLHttpRequest'}})
                     .then(function (response) {
+                        // Session expirée : fetch a suivi la redirection vers la page de connexion.
+                        if (response.redirected) {
+                            return {ok: false, data: {error: 'Session expirée : enregistrez votre saisie ailleurs, rechargez la page et reconnectez-vous.'}};
+                        }
                         return response.json().then(
                             function (data) { return {ok: response.ok, data: data}; },
                             function () { return {ok: false, data: {error: 'Réponse inattendue du serveur (HTTP ' + response.status + ').'}}; }

@@ -129,6 +129,10 @@ class ProductController extends AbstractController
             return new JsonResponse(['error' => 'Jeton de sécurité expiré : rechargez la page.'], Response::HTTP_FORBIDDEN);
         }
 
+        // Libérer le verrou de session avant l'appel LLM : sans cela, les autres
+        // requêtes du même utilisateur (autre onglet, chat) attendraient sa fin.
+        $request->getSession()->save();
+
         // La génération d'une fiche entière peut dépasser le délai PHP par défaut.
         set_time_limit(240);
 

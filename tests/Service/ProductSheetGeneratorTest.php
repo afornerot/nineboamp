@@ -66,7 +66,44 @@ class ProductSheetGeneratorTest extends TestCase
         $this->generator(null, $ai)->generate(['name' => ' xolo ', 'keywords' => 'llm', 'fiche' => '# Brouillon'], ' trop commercial ');
     }
 
-    public function testGenerateBoundsTheFicheAndTheInstructionSentToTheModel(): void
+    public function testKeywordsStartingWithADigitOrADotAreKeptWhole(): void
+    {
+        $answer = "===DESCRIPTION===\nd\n===MOTS-CLES===\n- 3D, .NET, 4G privée\n1. impression 3D\n2) SIG\n===SECTEURS===\ns\n===FICHE===\n# X";
+
+        $this->assertSame('3D, .NET, 4G privée, impression 3D, SIG', $this->generator($answer)->generate(['name' => 'x', 'fiche' => 'x'])['keywords']);
+    }
+
+    public function testAccentedOrLowercaseMarkersAreRecognised(): void
+    {
+        $answer = "===Description===\nd\n=== MOTS-CLÉS ===\nGED, SIG\n===secteurs===\nSanté\n===FICHE===\n# X";
+
+        $result = $this->generator($answer)->generate(['name' => 'x', 'fiche' => 'x']);
+
+        $this->assertSame('d', $result['description']);
+        $this->assertSame('GED, SIG', $result['keywords']);
+        $this->assertSame('Santé', $result['sectors']);
+    }
+
+    public function testAnUnknownMarkerFailsInsteadOfMixingFields(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage("n'est pas exploitable");
+
+        $this->generator("===DESCRIPTION===\nd\n===TAGS===\nGED\n===SECTEURS===\ns\n===FICHE===\n# X")->generate(['name' => 'x', 'fiche' => 'x']);
+    }
+
+    public function testATooLongSheetIsRefusedRatherThanSilentlyTruncated(): void
+    {
+        $ai = $this->createMock(AiService::class);
+        $ai->expects($this->never())->method('ask');
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('La fiche dépasse 30 000 caractères (30 001)');
+
+        $this->generator(null, $ai)->generate(['name' => 'x', 'fiche' => str_repeat('f', ProductSheetGenerator::MAX_FICHE_INPUT_LENGTH + 1)]);
+    }
+
+    public function testGenerateBoundsTheInstructionSentToTheModel(): void
     {
         $sent = '';
         $ai = $this->createStub(AiService::class);
@@ -76,9 +113,8 @@ class ProductSheetGeneratorTest extends TestCase
             return self::ANSWER;
         });
 
-        $this->generator(null, $ai)->generate(['name' => 'xolo', 'fiche' => str_repeat('f', 50000)], str_repeat('z', 5000));
+        $this->generator(null, $ai)->generate(['name' => 'xolo', 'fiche' => 'x'], str_repeat('z', 5000));
 
-        $this->assertSame(ProductSheetGenerator::MAX_FICHE_INPUT_LENGTH, substr_count($sent, 'f'));
         $this->assertSame(ProductSheetGenerator::MAX_INSTRUCTION_LENGTH, substr_count($sent, 'z'));
     }
 

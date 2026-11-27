@@ -224,7 +224,8 @@ class ProductMetadataExtractor
                 continue;
             }
             $v = trim($v);
-            $v = preg_replace('/^[\s\-•*\d.]+/u', '', $v) ?? $v;
+            // Seulement les marqueurs de liste : « 3D » ou « .NET » restent entiers.
+            $v = preg_replace('/^\s*(?:[-•*]\s*|\d+[.)]\s+)/u', '', $v) ?? $v;
             $v = trim($v);
             if ('' === $v || mb_strlen($v) > self::MAX_KEYWORD_LENGTH) {
                 continue;

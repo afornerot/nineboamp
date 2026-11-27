@@ -26,9 +26,12 @@ class ProductSheetGenerator
      */
     private const TIMEOUT = 180;
 
+    /**
+     * Champ du formulaire => motif du nom de bloc dans la réponse.
+     */
     private const SECTIONS = [
         'description' => 'DESCRIPTION',
-        'keywords' => 'MOTS-CLES',
+        'keywords' => 'MOTS[-_ ]?CL[EÉ]S',
         'sectors' => 'SECTEURS',
         'fiche' => 'FICHE',
     ];
@@ -60,6 +63,12 @@ class ProductSheetGenerator
             throw new \RuntimeException("Rien à réécrire : saisissez au moins une ébauche de fiche, une description ou une consigne pour l'IA.");
         }
 
+        if (mb_strlen($fiche) > self::MAX_FICHE_INPUT_LENGTH) {
+            // Pas de troncature silencieuse : la proposition remplace toute la
+            // fiche, la fin non lue serait perdue sans que l'utilisateur le sache.
+            throw new \RuntimeException(sprintf('La fiche dépasse %s caractères (%s) : raccourcissez-la avant de lancer la génération.', number_format(self::MAX_FICHE_INPUT_LENGTH, 0, ',', ' '), number_format(mb_strlen($fiche), 0, ',', ' ')));
+        }
+
         $system = $this->promptLoader->renderSystem('product.generate.system');
         $user = $this->promptLoader->renderUser('product.generate.user', [
             'name' => $name,
@@ -67,7 +76,7 @@ class ProductSheetGenerator
             'keywords' => $this->orNone($current['keywords'] ?? ''),
             'sectors' => $this->orNone($current['sectors'] ?? ''),
             'instruction' => '' !== $instruction ? mb_substr($instruction, 0, self::MAX_INSTRUCTION_LENGTH) : 'Aucune consigne particulière.',
-            'fiche' => '' !== $fiche ? mb_substr($fiche, 0, self::MAX_FICHE_INPUT_LENGTH) : '(fiche vide)',
+            'fiche' => '' !== $fiche ? $fiche : '(fiche vide)',
         ]);
         if ('' === $system || '' === $user) {
             throw new \RuntimeException('Prompts product.generate.*.md introuvables.');
@@ -80,8 +89,10 @@ class ProductSheetGenerator
         }
 
         $sections = $this->parse($response);
-        if ('' === $sections['fiche']) {
-            $this->logger->warning('ProductSheetGenerator: réponse LLM sans fiche', ['product' => $name, 'response' => mb_substr($response, 0, 500)]);
+        // Un « === » restant signale un marqueur non reconnu, donc des blocs
+        // mélangés : mieux vaut échouer que remplir le formulaire de travers.
+        if ('' === $sections['fiche'] || str_contains(implode("\n", $sections), '===')) {
+            $this->logger->warning('ProductSheetGenerator: réponse LLM sans fiche ou mal découpée', ['product' => $name, 'response' => mb_substr($response, 0, 500)]);
 
             throw new \RuntimeException("La réponse de l'IA n'est pas exploitable. Réessayez.");
         }
@@ -104,15 +115,18 @@ class ProductSheetGenerator
     {
         $sections = ['description' => '', 'keywords' => '', 'sectors' => '', 'fiche' => ''];
 
-        $markers = implode('|', array_map(static fn (string $marker): string => preg_quote($marker, '/'), self::SECTIONS));
-        $parts = preg_split('/^\s*={3,}\s*('.$markers.')\s*={3,}\s*$/mu', $response, -1, \PREG_SPLIT_DELIM_CAPTURE);
+        // Tolérant sur la casse et les accents : un modèle écrit volontiers « MOTS-CLÉS ».
+        $parts = preg_split('/^\s*={3,}\s*('.implode('|', self::SECTIONS).')\s*={3,}\s*$/miu', $response, -1, \PREG_SPLIT_DELIM_CAPTURE);
         if (false === $parts) {
             return $sections;
         }
 
-        $keys = array_flip(self::SECTIONS);
         for ($i = 1; $i + 1 < count($parts); $i += 2) {
-            $sections[$keys[$parts[$i]]] = trim($parts[$i + 1]);
+            foreach (self::SECTIONS as $key => $pattern) {
+                if (1 === preg_match('/^(?:'.$pattern.')$/iu', $parts[$i])) {
+                    $sections[$key] = trim($parts[$i + 1]);
+                }
+            }
         }
 
         // Un modèle entoure parfois la fiche d'un bloc de code malgré la consigne.
@@ -137,7 +151,9 @@ class ProductSheetGenerator
     {
         $clean = [];
         foreach (preg_split('/[,;\n]+/u', $raw) ?: [] as $term) {
-            $term = trim((string) preg_replace('/^[\s\-•*\d.]+/u', '', $term));
+            // Seulement les marqueurs de liste (« - », « 1. ») : un terme peut
+            // légitimement commencer par un chiffre ou un point (3D, .NET, 4G).
+            $term = trim((string) preg_replace('/^\s*(?:[-•*]\s*|\d+[.)]\s+)/u', '', $term));
             $key = mb_strtolower($term);
             if ('' === $term || mb_strlen($term) > $maxLength || isset($clean[$key])) {
                 continue;

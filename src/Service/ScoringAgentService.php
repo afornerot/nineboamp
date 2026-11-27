@@ -9,6 +9,7 @@ class ScoringAgentService
 {
     public function __construct(
         private AgentJobClient $agentJobs,
+        private CompanyContextBuilder $companyContext,
     ) {
     }
 
@@ -38,6 +39,7 @@ class ScoringAgentService
             'amount' => $amount,
             'deadline' => $deadline,
             'products' => $products,
+            'company_context' => $this->companyContext->build(),
         ]);
     }
 

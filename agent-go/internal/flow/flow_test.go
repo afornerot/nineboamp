@@ -67,10 +67,10 @@ func writePrompt(t *testing.T, dir, name, content string) {
 func testPrompts(t *testing.T) *prompts.Prompts {
 	t.Helper()
 	dir := t.TempDir()
-	writePrompt(t, dir, "chat.context.md", "---\ntemperature: 0.3\n---\n\nSYSTEME CHAT\n")
-	writePrompt(t, dir, "scoring.role.md", "SYSTEME SCORING\n")
+	writePrompt(t, dir, "chat.context.md", "---\ntemperature: 0.3\n---\n\nSYSTEME CHAT\n{{competences}}\n")
+	writePrompt(t, dir, "scoring.role.md", "SYSTEME SCORING\n{{competences}}\n")
 	writePrompt(t, dir, "scoring.user.md", "IDWEB:{{idweb}}|TITRE:{{title}}|ACHETEUR:{{buyer}}|DESC:{{description}}|MONTANT:{{amount}}|LIMITE:{{deadline}}|CAT:{{catalogue}}\n")
-	writePrompt(t, dir, "report.system.md", "SYSTEME RAPPORT\n")
+	writePrompt(t, dir, "report.system.md", "SYSTEME RAPPORT\n{{competences}}\n")
 	writePrompt(t, dir, "report.user.md", "META:{{metadata}}|DESC:{{description}}|PROD:{{products}}|CAT:{{catalogue}}|HIST:{{chatHistory}}\n")
 	return prompts.New(dir)
 }
@@ -509,5 +509,41 @@ func TestScoreTimeoutCoversBothCalls(t *testing.T) {
 	svc = New(&fakeClient{}, testPrompts(t), nil, Config{CallTimeout: 30 * time.Second, ScoreStructuredTimeout: 45 * time.Second})
 	if got := svc.ScoreTimeout(); got != 60*time.Second {
 		t.Errorf("ScoreTimeout = %s, attendu 30s + 30s", got)
+	}
+}
+
+func TestCompanyContextSubstitutedInSystemPrompts(t *testing.T) {
+	const company = "### Savoir-faire\n- Développement web"
+	reply := `{"score": 10, "priority": "C", "explanation": "x", "products": []}`
+
+	runs := map[string]func(*Service){
+		"chat":   func(s *Service) { s.Chat(context.Background(), ChatRequest{Message: "?", CompanyContext: company}) },
+		"score":  func(s *Service) { s.Score(context.Background(), ScoreRequest{Title: "t", CompanyContext: company}) },
+		"report": func(s *Service) { s.Report(context.Background(), ReportRequest{Title: "t", CompanyContext: company}) },
+	}
+	for name, run := range runs {
+		client := &fakeClient{queue: []fakeCall{assistant(reply)}}
+		run(newService(t, client, nil, Config{}))
+
+		system := client.calls[0].messages[0].Content()
+		if !strings.Contains(system, company) {
+			t.Errorf("%s : compétences absentes du prompt système : %q", name, system)
+		}
+		if strings.Contains(system, "{{") {
+			t.Errorf("%s : placeholder non substitué : %q", name, system)
+		}
+	}
+}
+
+func TestCompanyContextMissingLeavesNoPlaceholder(t *testing.T) {
+	client := &fakeClient{queue: []fakeCall{assistant("ok")}}
+	newService(t, client, nil, Config{}).Chat(context.Background(), ChatRequest{Message: "?"})
+
+	system := client.calls[0].messages[0].Content()
+	if strings.Contains(system, "{{") {
+		t.Errorf("placeholder non substitué sans company_context : %q", system)
+	}
+	if !strings.Contains(system, "non renseignées") {
+		t.Errorf("mention de repli absente : %q", system)
 	}
 }

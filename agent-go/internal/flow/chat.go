@@ -22,7 +22,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (status string, res
 		}
 	}()
 
-	messages := []llm.Message{llm.NewMessage(llm.RoleSystem, s.prompts.ChatSystem())}
+	messages := []llm.Message{llm.NewMessage(llm.RoleSystem, withCompanyContext(s.prompts.ChatSystem(), req.CompanyContext))}
 	for _, m := range req.History {
 		role := m.Role
 		if role == "" {

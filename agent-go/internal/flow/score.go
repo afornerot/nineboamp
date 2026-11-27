@@ -21,7 +21,7 @@ func (s *Service) Score(ctx context.Context, req ScoreRequest) (status string, r
 	}()
 
 	messages := []llm.Message{
-		llm.NewMessage(llm.RoleSystem, s.prompts.ScoringRole()),
+		llm.NewMessage(llm.RoleSystem, withCompanyContext(s.prompts.ScoringRole(), req.CompanyContext)),
 		llm.NewMessage(llm.RoleUser, buildScoreUserPrompt(s.prompts.ScoringUser(), req)),
 	}
 

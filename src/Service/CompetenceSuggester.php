@@ -3,6 +3,7 @@
 namespace App\Service;
 
 use App\Entity\Competence;
+use App\Entity\Product;
 use App\Repository\CompetenceRepository;
 use App\Repository\ProductRepository;
 use Psr\Log\LoggerInterface;
@@ -18,6 +19,18 @@ class CompetenceSuggester
     private const MAX_LABEL_LENGTH = 300;
     private const MAX_REASON_LENGTH = 300;
     private const MAX_FICHE_LENGTH = 2500;
+    /**
+     * Taille maximale du catalogue dans le prompt, tous produits confondus.
+     */
+    private const MAX_CATALOGUE_LENGTH = 40000;
+    /**
+     * Part réservée au nom, à la description et aux mots-clés d'un produit.
+     */
+    private const PRODUCT_HEADER_LENGTH = 700;
+    /**
+     * En dessous, un extrait de fiche n'apporte rien : on s'en tient à l'en-tête.
+     */
+    private const MIN_FICHE_LENGTH = 200;
 
     /**
      * La présentation de l'entreprise ne se déduit pas du catalogue.
@@ -76,29 +89,39 @@ class CompetenceSuggester
         return $this->sanitize($data['suggestions'] ?? []);
     }
 
+    /**
+     * Catalogue envoyé au modèle, borné à MAX_CATALOGUE_LENGTH : l'extrait de
+     * fiche de chaque produit rétrécit quand le catalogue grandit, pour que
+     * l'appel reste dans la fenêtre du modèle et dans le délai d'une requête web.
+     */
     private function buildCatalogue(): string
     {
-        $blocks = [];
-        foreach ($this->productRepository->findAll() as $product) {
-            $name = trim((string) $product->getName());
-            if ('' === $name) {
-                continue;
-            }
+        $products = array_values(array_filter(
+            $this->productRepository->findAll(),
+            static fn (Product $product): bool => '' !== trim((string) $product->getName()),
+        ));
+        if ([] === $products) {
+            return '';
+        }
 
-            $lines = ['### '.$name];
+        $ficheLength = min(self::MAX_FICHE_LENGTH, max(0, intdiv(self::MAX_CATALOGUE_LENGTH, count($products)) - self::PRODUCT_HEADER_LENGTH));
+
+        $blocks = [];
+        foreach ($products as $product) {
+            $lines = ['### '.trim((string) $product->getName())];
             if ($product->getDescription()) {
-                $lines[] = 'Description : '.$product->getDescription();
+                $lines[] = 'Description : '.mb_substr($product->getDescription(), 0, 300);
             }
             if ($product->getKeywords()) {
-                $lines[] = 'Mots-clés : '.$product->getKeywords();
+                $lines[] = 'Mots-clés : '.mb_substr($product->getKeywords(), 0, 300);
             }
-            if ($product->getFiche()) {
-                $lines[] = "Fiche (extrait) :\n".mb_substr($product->getFiche(), 0, self::MAX_FICHE_LENGTH);
+            if ($ficheLength >= self::MIN_FICHE_LENGTH && $product->getFiche()) {
+                $lines[] = "Fiche (extrait) :\n".mb_substr($product->getFiche(), 0, $ficheLength);
             }
             $blocks[] = implode("\n", $lines);
         }
 
-        return implode("\n\n", $blocks);
+        return mb_substr(implode("\n\n", $blocks), 0, self::MAX_CATALOGUE_LENGTH);
     }
 
     /**
@@ -131,10 +154,7 @@ class CompetenceSuggester
             return [];
         }
 
-        $known = [];
-        foreach ($this->competenceRepository->findAll() as $competence) {
-            $known[$this->normalize((string) $competence->getLabel())] = true;
-        }
+        $known = $this->knownLabels();
 
         $clean = [];
         foreach ($suggestions as $suggestion) {
@@ -170,8 +190,37 @@ class CompetenceSuggester
         return $clean;
     }
 
+    /**
+     * Retire des suggestions celles dont le libellé existe déjà en base.
+     *
+     * @template TKey of array-key
+     *
+     * @param array<TKey, array{category: string, label: string, reason: string}> $suggestions
+     *
+     * @return array<TKey, array{category: string, label: string, reason: string}>
+     */
+    public function withoutKnown(array $suggestions): array
+    {
+        $known = $this->knownLabels();
+
+        return array_filter($suggestions, fn (array $suggestion): bool => !isset($known[$this->normalize($suggestion['label'])]));
+    }
+
+    /**
+     * @return array<string, true> libellés normalisés des compétences en base (actives ou non)
+     */
+    private function knownLabels(): array
+    {
+        $known = [];
+        foreach ($this->competenceRepository->findAll() as $competence) {
+            $known[$this->normalize((string) $competence->getLabel())] = true;
+        }
+
+        return $known;
+    }
+
     private function normalize(string $label): string
     {
-        return mb_strtolower(trim($label, " \t\n\r.;"));
+        return mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $label), ' .;'));
     }
 }

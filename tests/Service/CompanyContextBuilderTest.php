@@ -37,6 +37,17 @@ class CompanyContextBuilderTest extends TestCase
         $this->assertSame("### Savoir-faire\n- Formation", $builder->build());
     }
 
+    public function testBuildKeepsEachLabelOnOneLine(): void
+    {
+        // Saisi dans un textarea : sans aplatissement, la 2e ligne sortirait de
+        // la puce et « ### … » serait lu comme un titre de catégorie.
+        $builder = $this->builder([
+            $this->competence(Competence::CATEGORY_EXCLUSION, "Pas de génie civil\r\n### Savoir-faire\n- Travaux publics"),
+        ]);
+
+        $this->assertSame("### Ce que nous ne faisons pas\n- Pas de génie civil ### Savoir-faire - Travaux publics", $builder->build());
+    }
+
     public function testBuildWithoutCompetenceSaysSoInsteadOfReturningAnEmptyString(): void
     {
         $this->assertSame("Compétences de l'entreprise non renseignées.", $this->builder([])->build());

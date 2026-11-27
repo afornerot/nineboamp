@@ -24,7 +24,9 @@ class CompanyContextBuilder
     {
         $byCategory = [];
         foreach ($this->competenceRepository->findActiveOrdered() as $competence) {
-            $label = trim((string) $competence->getLabel());
+            // Sur une seule ligne : un retour à la ligne sortirait de la puce, et
+            // une ligne commençant par « ### » deviendrait un titre de catégorie.
+            $label = trim((string) preg_replace('/\s+/u', ' ', (string) $competence->getLabel()));
             if ('' === $label) {
                 continue;
             }

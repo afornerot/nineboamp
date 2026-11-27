@@ -17,6 +17,21 @@ class CompetenceRepository extends ServiceEntityRepository
     }
 
     /**
+     * Ordre proposé pour une nouvelle compétence : à la suite de sa catégorie.
+     */
+    public function nextPosition(string $category): int
+    {
+        $max = $this->createQueryBuilder('c')
+            ->select('MAX(c.position)')
+            ->where('c.category = :category')
+            ->setParameter('category', $category)
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        return (int) $max + 10;
+    }
+
+    /**
      * Compétences actives, dans l'ordre d'affichage au sein de chaque catégorie.
      *
      * @return Competence[]

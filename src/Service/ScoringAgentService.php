@@ -39,7 +39,7 @@ class ScoringAgentService
             'amount' => $amount,
             'deadline' => $deadline,
             'products' => $products,
-            'company_context' => $this->companyContext->build(),
+            AgentJobClient::CAPABILITY_COMPANY_CONTEXT => $this->companyContext->build(),
         ]);
     }
 

@@ -26,7 +26,7 @@ class AgentService
                 'message' => $message,
                 'history' => $history,
                 'reset_session' => $resetSession,
-                'company_context' => $this->companyContext->build(),
+                AgentJobClient::CAPABILITY_COMPANY_CONTEXT => $this->companyContext->build(),
             ])['job_id'];
         } catch (\RuntimeException) {
             return null;

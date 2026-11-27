@@ -29,15 +29,24 @@ class CompetenceController extends AbstractController
     }
 
     #[Route('/admin/competence', name: 'app_admin_competence')]
-    public function list(Request $request, CompanyContextBuilder $contextBuilder): Response
+    public function list(Request $request, CompanyContextBuilder $contextBuilder, CompetenceSuggester $suggester): Response
     {
+        // Une suggestion ajoutée entre-temps (à la main, depuis un autre onglet)
+        // ne doit plus être proposée : l'accepter créerait un doublon.
+        $session = $request->getSession();
+        $suggestions = $session->get(self::SESSION_SUGGESTIONS);
+        if (is_array($suggestions) && [] !== $suggestions) {
+            $suggestions = $suggester->withoutKnown($suggestions);
+            $session->set(self::SESSION_SUGGESTIONS, $suggestions);
+        }
+
         return $this->renderLayout('competence/list.html.twig', 'Compétences de l\'entreprise', [
             'routesubmit' => 'app_admin_competence_submit',
             'routeupdate' => 'app_admin_competence_update',
             'competences' => $this->competenceRepository->findBy([], ['position' => 'ASC', 'id' => 'ASC']),
             'categories' => Competence::CATEGORIES,
             'preview' => $contextBuilder->build(),
-            'suggestions' => $request->getSession()->get(self::SESSION_SUGGESTIONS),
+            'suggestions' => $suggestions,
         ]);
     }
 
@@ -111,6 +120,7 @@ class CompetenceController extends AbstractController
             $competence->setCategory($suggestion['category']);
             $competence->setLabel($suggestion['label']);
         }
+        $competence->setPosition($this->competenceRepository->nextPosition($competence->getCategory()));
 
         $form = $this->createForm(CompetenceType::class, $competence, ['mode' => 'submit']);
         $form->handleRequest($request);

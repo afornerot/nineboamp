@@ -81,6 +81,56 @@ class CompetenceSuggesterTest extends TestCase
         $this->suggester('Désolé, je ne peux pas.')->suggest();
     }
 
+    public function testWithoutKnownDropsSuggestionsAddedSinceAndKeepsKeys(): void
+    {
+        $suggestions = [
+            'a' => ['category' => 'offre', 'label' => 'FORMATION  aux logiciels libres.', 'reason' => ''],
+            'b' => ['category' => 'offre', 'label' => 'Hébergement souverain', 'reason' => ''],
+        ];
+
+        $this->assertSame(['b' => $suggestions['b']], $this->suggester('{}')->withoutKnown($suggestions));
+    }
+
+    public function testCatalogueSentToTheModelIsBoundedWhateverTheNumberOfProducts(): void
+    {
+        $products = [];
+        for ($i = 0; $i < 120; ++$i) {
+            $products[] = (new Product())->setName('produit-'.$i)->setDescription(str_repeat('d', 1000))->setFiche(str_repeat('f', 12000));
+        }
+
+        $sent = '';
+        $ai = $this->createStub(AiService::class);
+        $ai->method('ask')->willReturnCallback(function (string $prompt) use (&$sent): string {
+            $sent = $prompt;
+
+            return '{"suggestions":[]}';
+        });
+
+        $this->suggester(null, $ai, $products)->suggest();
+
+        $this->assertLessThanOrEqual(40100, mb_strlen($sent));
+        // Chaque produit reste nommé : c'est l'extrait de fiche qui cède la place.
+        $this->assertStringContainsString('### produit-0', $sent);
+        $this->assertStringContainsString('### produit-119', $sent);
+        $this->assertStringNotContainsString('Fiche (extrait)', $sent);
+    }
+
+    public function testFewProductsKeepAFicheExcerpt(): void
+    {
+        $sent = '';
+        $ai = $this->createStub(AiService::class);
+        $ai->method('ask')->willReturnCallback(function (string $prompt) use (&$sent): string {
+            $sent = $prompt;
+
+            return '{"suggestions":[]}';
+        });
+
+        $this->suggester(null, $ai, [(new Product())->setName('xolo')->setFiche(str_repeat('f', 12000))])->suggest();
+
+        $this->assertStringContainsString("Fiche (extrait) :\n".str_repeat('f', 2500), $sent);
+        $this->assertStringNotContainsString(str_repeat('f', 2501), $sent);
+    }
+
     /**
      * @param Product[]|null $products
      */

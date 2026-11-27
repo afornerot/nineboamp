@@ -68,6 +68,7 @@ docker compose logs -f nineboamp      # attendre « START HTTPD »
 - Ne lancer aucune commande `bin/console` avant « START HTTPD » (interblocage avec `app:init`).
 - Le schéma est mis à jour au démarrage à partir des entités ; `migrations/` est vide. Une nouvelle entité ou colonne n'a donc pas besoin de migration, mais demande un redémarrage du conteneur.
 - `src/`, `templates/`, `config/` et `misc/` sont montés dans le conteneur : une modification PHP ou Twig est active tout de suite.
+- `AgentJobClient` refuse de démarrer un job si `GET /health` de l'agent n'annonce pas la capacité `company_context` : après un `git pull` qui touche l'agent, sans reconstruction, le scoring et le rapport échouent avec un message explicite.
 - **`agent-go/` n'est pas monté** : l'agent tourne depuis le binaire de l'image. Toute modification Go demande `docker compose up -d --build nineboamp`. Sans cela, le nouveau PHP dialogue avec l'ancien agent.
 - Après modification de `.env.local` : `docker compose restart nineboamp`.
 

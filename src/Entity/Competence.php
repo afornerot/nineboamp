@@ -4,6 +4,7 @@ namespace App\Entity;
 
 use App\Repository\CompetenceRepository;
 use Doctrine\ORM\Mapping as ORM;
+use Symfony\Component\Validator\Constraints as Assert;
 
 /**
  * Élément du contexte entreprise injecté dans les prompts LLM (placeholder
@@ -27,19 +28,25 @@ class Competence
         self::CATEGORY_EXCLUSION => 'Ce que nous ne faisons pas',
     ];
 
+    public const LABEL_MAX_LENGTH = 500;
+
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column]
     private ?int $id = null;
 
     #[ORM\Column(length: 32)]
+    #[Assert\Choice(choices: [self::CATEGORY_PRESENTATION, self::CATEGORY_SAVOIR_FAIRE, self::CATEGORY_OFFRE, self::CATEGORY_EXCLUSION])]
     private string $category = self::CATEGORY_SAVOIR_FAIRE;
 
     #[ORM\Column(type: 'text')]
+    #[Assert\NotBlank(message: 'Le libellé est obligatoire.', normalizer: 'trim')]
+    #[Assert\Length(max: self::LABEL_MAX_LENGTH, maxMessage: 'Le libellé ne doit pas dépasser {{ limit }} caractères.')]
     private ?string $label = null;
 
     #[ORM\Column]
-    private int $position = 0;
+    #[Assert\NotNull(message: 'L\'ordre est obligatoire.')]
+    private ?int $position = 0;
 
     #[ORM\Column]
     private bool $active = true;
@@ -71,7 +78,7 @@ class Competence
         return $this->label;
     }
 
-    public function setLabel(string $label): static
+    public function setLabel(?string $label): static
     {
         $this->label = $label;
 
@@ -80,10 +87,10 @@ class Competence
 
     public function getPosition(): int
     {
-        return $this->position;
+        return $this->position ?? 0;
     }
 
-    public function setPosition(int $position): static
+    public function setPosition(?int $position): static
     {
         $this->position = $position;
 

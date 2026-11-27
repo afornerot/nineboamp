@@ -107,6 +107,10 @@ func TestHealth(t *testing.T) {
 	if body["status"] != "ok" || body["service"] != "agent" {
 		t.Errorf("body = %v", body)
 	}
+	caps, _ := body["capabilities"].([]any)
+	if len(caps) != 1 || caps[0] != CapabilityCompanyContext {
+		t.Errorf("capabilities = %v, attendu [company_context]", body["capabilities"])
+	}
 }
 
 func TestChatJobLifecycle(t *testing.T) {

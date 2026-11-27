@@ -147,9 +147,14 @@ Les prompts sont stockés dans `src/DataFixtures/data/scoring/*.md` (plus de BDD
 
 | Fichier | Rôle |
 |---------|------|
-| `chat.context.md` | System prompt pour le chat agenté (avec placeholders `{{metadata}}`, `{{description}}`, etc.) |
+| `chat.context.md` | System prompt pour le chat agenté (placeholders `{{competences}}`, `{{metadata}}`, `{{description}}`, `{{products}}`, `{{documents}}`) |
 | `scoring.role.md` | Rôle LLM pour le scoring (contexte entreprise via `{{competences}}`) |
 | `scoring.user.md` | Prompt de scoring marché par marché (JSON strict, placeholders `{{idweb}}`, `{{title}}`, `{{buyer}}`, `{{description}}`, `{{amount}}`, `{{deadline}}`, `{{catalogue}}`) |
+| `report.system.md` | Rôle LLM et plan du rapport de positionnement (contexte entreprise via `{{competences}}`) |
+| `report.user.md` | Données du marché pour le rapport (placeholders `{{metadata}}`, `{{description}}`, `{{products}}`, `{{catalogue}}`, `{{chatHistory}}`) |
+| `competence.suggest.system.md` | Rôle LLM pour la suggestion de compétences depuis le catalogue (JSON strict) |
+| `competence.suggest.user.md` | Données de la suggestion (placeholders `{{competences}}`, `{{catalogue}}`, `{{max}}`) |
+| `extract.system.md`, `extract.user.md` | Extraction des mots-clés, secteurs et description d'un produit (placeholders `{{tasks}}`, `{{schema}}`, `{{fiche}}`) |
 
 Le catalogue est rendu par l'agent sous la forme `- **nom** (ID: 83)` : le LLM
 reprend cet `id` dans chaque entrée `products[]`, et PHP associe le produit par
@@ -179,8 +184,13 @@ faisons pas ») n'est plus écrit dans les prompts : il est géré en base (enti
   établissent et qui manquent. Rien n'est enregistré : chaque proposition ouvre
   le formulaire prérempli, à relire et valider.
 - Un agent antérieur à ce champ laisserait `{{competences}}` tel quel dans le
-  prompt : reconstruire l'image après mise à jour
-  (`docker compose up -d --build nineboamp`).
+  prompt. `AgentJobClient` s'en protège : il vérifie que `GET /health` annonce
+  la capacité `company_context` et refuse sinon de démarrer le job, avec un
+  message demandant de reconstruire l'image
+  (`docker compose up -d --build nineboamp`). Le chat se replie alors sur
+  l'appel LLM direct de PHP ; le scoring et le rapport échouent avec ce message.
+- Le catalogue envoyé pour la suggestion est borné à 40 000 caractères : les
+  extraits de fiches raccourcissent quand le nombre de produits augmente.
 
 Les prompts supportent un frontmatter YAML minimal :
 

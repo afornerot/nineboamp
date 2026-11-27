@@ -91,7 +91,7 @@ class MarketReportService
             'products' => $products,
             'catalogue' => $catalogue,
             'chat_history' => $chatHistory,
-            'company_context' => $this->companyContext->build(),
+            AgentJobClient::CAPABILITY_COMPANY_CONTEXT => $this->companyContext->build(),
         ];
     }
 

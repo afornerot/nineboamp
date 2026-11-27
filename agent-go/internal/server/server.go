@@ -76,8 +76,18 @@ func New(cfg Config) http.Handler {
 	return withRecovery(withCORS(mux), logger)
 }
 
+// CapabilityCompanyContext : l'agent substitue {{competences}} dans les
+// prompts système à partir du champ company_context des requêtes.
+const CapabilityCompanyContext = "company_context"
+
 func (h *handler) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "service": "agent"})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":  "ok",
+		"service": "agent",
+		// PHP refuse de démarrer un job si l'agent n'annonce pas la capacité
+		// dont dépend son payload (agent plus ancien que le code PHP monté).
+		"capabilities": []string{CapabilityCompanyContext},
+	})
 }
 
 func (h *handler) startChat(w http.ResponseWriter, r *http.Request) {

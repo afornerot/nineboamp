@@ -31,7 +31,7 @@ class CompetenceType extends AbstractType
             ->add('label', TextareaType::class, [
                 'label' => 'Libellé',
                 'attr' => ['rows' => 3],
-                'help' => 'Texte transmis tel quel à l\'IA. Une compétence ou une exclusion par ligne du tableau.',
+                'help' => 'Une seule compétence ou exclusion par élément. Les retours à la ligne sont remplacés par des espaces dans le texte transmis à l\'IA.',
             ])
             ->add('position', IntegerType::class, [
                 'label' => 'Ordre',
